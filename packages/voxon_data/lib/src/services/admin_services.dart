@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:voxon_data/src/errors.dart';
 import 'package:voxon_data/src/models/business.dart';
@@ -18,6 +19,11 @@ abstract interface class AccountAuthService {
 
   Future<void> registerWithEmail(String email, String password);
 
+  /// Si esta plataforma puede entrar con Google (Android, iOS y web).
+  bool get canUseGoogle;
+
+  Future<void> signInWithGoogle();
+
   Future<void> signOut();
 }
 
@@ -30,6 +36,9 @@ abstract interface class AdminService {
   });
 
   Stream<InstanceSummary?> watchInstance(String instanceId);
+
+  /// Negocios donde trabaja la persona [uid], por nombre.
+  Stream<List<MyInstance>> watchMyInstances(String uid);
 
   // --- Cajas ---
 
@@ -112,6 +121,20 @@ class FirebaseAccountAuthService implements AccountAuthService {
   );
 
   @override
+  bool get canUseGoogle =>
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+
+  @override
+  Future<void> signInWithGoogle() => guard(() {
+    final provider = GoogleAuthProvider();
+    return kIsWeb
+        ? _auth.signInWithPopup(provider)
+        : _auth.signInWithProvider(provider);
+  });
+
+  @override
   Future<void> signOut() => _auth.signOut();
 }
 
@@ -140,6 +163,16 @@ class FirebaseAdminService implements AdminService {
         final data = snapshot.data();
         return data == null ? null : InstanceSummary.fromMap(snapshot.id, data);
       });
+
+  @override
+  Stream<List<MyInstance>> watchMyInstances(String uid) => _db
+      .collection('users/$uid/instances')
+      .snapshots()
+      .map(
+        (query) => [
+          for (final doc in query.docs) MyInstance.fromMap(doc.id, doc.data()),
+        ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())),
+      );
 
   @override
   Future<ClaimedPairing> claimPairing({

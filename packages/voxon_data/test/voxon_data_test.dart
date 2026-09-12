@@ -168,6 +168,22 @@ void main() {
     });
   });
 
+  test('la lista de negocios de cada persona trae su puesto y su modo', () {
+    final instance = MyInstance.fromMap('i1', {
+      'accountId': 'c1',
+      'name': 'La Fonda',
+      'mode': 'restaurant',
+      'role': 'manager',
+    });
+    expect(instance.name, 'La Fonda');
+    expect(instance.role, StaffRole.manager);
+    expect(instance.businessMode?.id, 'restaurant');
+
+    final broken = MyInstance.fromMap('i2', const {'mode': 'no-existe'});
+    expect(broken.role, StaffRole.locked);
+    expect(broken.businessMode, isNull);
+  });
+
   test('los errores de Firebase se muestran en español', () {
     expect(
       authMessage('invalid-credential'),

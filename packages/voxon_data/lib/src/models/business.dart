@@ -126,6 +126,36 @@ final class InstanceSummary {
   BusinessMode? get businessMode => ModeCatalog.standard.byId(mode);
 }
 
+/// Un negocio en la lista de la persona (users/{uid}/instances/{id}).
+final class MyInstance {
+  const MyInstance({
+    required this.id,
+    required this.accountId,
+    required this.name,
+    required this.mode,
+    required this.role,
+  });
+
+  factory MyInstance.fromMap(String id, Map<String, dynamic> data) =>
+      MyInstance(
+        id: id,
+        accountId: data['accountId'] as String? ?? '',
+        name: data['name'] as String? ?? '',
+        mode: data['mode'] as String? ?? '',
+        role: StaffRole.parse(data['role'] as String?),
+      );
+
+  final String id;
+  final String accountId;
+  final String name;
+  final String mode;
+
+  /// Puesto de la persona en este negocio.
+  final StaffRole role;
+
+  BusinessMode? get businessMode => ModeCatalog.standard.byId(mode);
+}
+
 /// Empleado de la instancia (el PIN nunca llega a las apps).
 final class StaffMember {
   const StaffMember({
