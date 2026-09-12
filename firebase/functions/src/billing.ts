@@ -29,7 +29,15 @@ interface StripeConfig {
   portalReturnUrl?: string;
 }
 
+/** Mientras no haya una clave real (sk_…), el cobro responde que falta configurarlo. */
+function stripeConfigured(): boolean {
+  return stripeSecretKey.value().startsWith("sk_");
+}
+
 function stripeClient(): Stripe {
+  if (!stripeConfigured()) {
+    throw new HttpsError("failed-precondition", "El cobro con Stripe aún no está configurado");
+  }
   return new Stripe(stripeSecretKey.value());
 }
 
@@ -182,6 +190,10 @@ export const stripeWebhook = onRequest(
     const signature = request.get("stripe-signature");
     if (!signature) {
       response.status(400).send("Falta la firma de Stripe");
+      return;
+    }
+    if (!stripeConfigured() || !stripeWebhookSecret.value().startsWith("whsec_")) {
+      response.status(503).send("El cobro con Stripe aún no está configurado");
       return;
     }
     const stripe = stripeClient();
