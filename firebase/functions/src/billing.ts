@@ -82,7 +82,7 @@ async function customerFor(stripe: Stripe, accountId: string, email: string | un
 }
 
 /** Enlace de pago para subir o empezar un plan. */
-export const createCheckoutSession = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+export const createCheckoutSession = onCall({ secrets: [stripeSecretKey], invoker: "public" }, async (request) => {
   const accountId = typeof request.data?.accountId === "string" ? request.data.accountId : "";
   const tier = request.data?.tier;
   if (!isTier(tier)) {
@@ -113,7 +113,7 @@ export const createCheckoutSession = onCall({ secrets: [stripeSecretKey] }, asyn
 });
 
 /** Enlace al portal de Stripe: cambiar tarjeta, ver facturas o cancelar. */
-export const createBillingPortalSession = onCall({ secrets: [stripeSecretKey] }, async (request) => {
+export const createBillingPortalSession = onCall({ secrets: [stripeSecretKey], invoker: "public" }, async (request) => {
   const accountId = typeof request.data?.accountId === "string" ? request.data.accountId : "";
   await requireAccountOwner(accountId, request.auth?.uid);
 
@@ -185,7 +185,7 @@ async function applySubscription(subscription: Stripe.Subscription): Promise<voi
 
 /** Stripe avisa aquí de cada pago, cambio o cancelación. */
 export const stripeWebhook = onRequest(
-  { secrets: [stripeSecretKey, stripeWebhookSecret], cors: false },
+  { secrets: [stripeSecretKey, stripeWebhookSecret], cors: false, invoker: "public" },
   async (request, response) => {
     const signature = request.get("stripe-signature");
     if (!signature) {

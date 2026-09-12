@@ -65,7 +65,8 @@ function instanceDefaults(accountId: string, name: string, mode: string) {
 // --- Cuentas e instancias ----------------------------------------------------
 
 /** Primer paso del cliente: su cuenta con prueba gratis y su primer negocio. */
-export const createAccount = onCall(async (request) => {
+// Las funciones que llama la app son públicas para Google; la sesión la revisa el código.
+export const createAccount = onCall({ invoker: "public" }, async (request) => {
   const uid = requireUid(request.auth);
   const accountName = cleanName(request.data?.accountName, "el nombre de tu cuenta");
   const instanceName = cleanName(request.data?.instanceName, "el nombre de tu negocio");
@@ -83,7 +84,8 @@ export const createAccount = onCall(async (request) => {
     createdAt: FieldValue.serverTimestamp(),
     plan: { tier, status: "trial", source: "trial", trialEndsAt, currentPeriodEnd: trialEndsAt },
     limits: limitsFor(tier),
-    usage: { instances: 1, users: 1 },
+    // A los usuarios, dueño incluido, los cuenta onMemberAdded.
+    usage: { instances: 1, users: 0 },
   });
   batch.set(accountRef.collection("members").doc(uid), {
     role: "owner",
@@ -100,7 +102,7 @@ export const createAccount = onCall(async (request) => {
 });
 
 /** Un negocio más dentro de la cuenta, si el plan lo permite. */
-export const createInstance = onCall(async (request) => {
+export const createInstance = onCall({ invoker: "public" }, async (request) => {
   const uid = requireUid(request.auth);
   const accountId = typeof request.data?.accountId === "string" ? request.data.accountId : "";
   const name = cleanName(request.data?.name, "el nombre del negocio");
@@ -139,22 +141,44 @@ export const createInstance = onCall(async (request) => {
 
 // --- Uso de la cuenta --------------------------------------------------------
 
-async function changeUserCount(instanceId: string, delta: number): Promise<void> {
+/**
+ * Una persona cuenta como un solo usuario aunque trabaje en varias instancias de la
+ * cuenta: accounts/{cuenta}/people/{uid} guarda en cuántas está, y usage.users solo
+ * cambia cuando pasa de 0 a 1 o de 1 a 0.
+ */
+async function changeMembership(instanceId: string, uid: string, delta: number): Promise<void> {
   const instance = await db.doc(`instances/${instanceId}`).get();
   const accountId = instance.get("accountId");
-  if (typeof accountId === "string") {
-    await db.doc(`accounts/${accountId}`).update({ "usage.users": FieldValue.increment(delta) });
+  if (typeof accountId !== "string") {
+    return;
   }
+  const accountRef = db.doc(`accounts/${accountId}`);
+  const personRef = accountRef.collection("people").doc(uid);
+  await db.runTransaction(async (transaction) => {
+    const person = await transaction.get(personRef);
+    const before = person.exists ? Number(person.get("memberships") ?? 0) : 0;
+    const after = Math.max(0, before + delta);
+    if (after === 0) {
+      transaction.delete(personRef);
+    } else {
+      transaction.set(personRef, { memberships: after }, { merge: true });
+    }
+    if (before === 0 && after > 0) {
+      transaction.update(accountRef, { "usage.users": FieldValue.increment(1) });
+    } else if (before > 0 && after === 0) {
+      transaction.update(accountRef, { "usage.users": FieldValue.increment(-1) });
+    }
+  });
 }
 
 export const onMemberAdded = onDocumentCreated(
   { document: "instances/{instanceId}/members/{uid}", database: DATABASE },
-  (event) => changeUserCount(event.params.instanceId, 1),
+  (event) => changeMembership(event.params.instanceId, event.params.uid, 1),
 );
 
 export const onMemberRemoved = onDocumentDeleted(
   { document: "instances/{instanceId}/members/{uid}", database: DATABASE },
-  (event) => changeUserCount(event.params.instanceId, -1),
+  (event) => changeMembership(event.params.instanceId, event.params.uid, -1),
 );
 
 // --- Resumen del día ---------------------------------------------------------
@@ -248,7 +272,7 @@ export const onSaleVoided = onDocumentUpdated(
 // --- Invitaciones ------------------------------------------------------------
 
 /** Deja la invitación lista para que el empleado entre con el código. */
-export const createInvite = onCall(async (request) => {
+export const createInvite = onCall({ invoker: "public" }, async (request) => {
   const uid = requireUid(request.auth);
   const instanceId = typeof request.data?.instanceId === "string" ? request.data.instanceId : "";
   const role = typeof request.data?.role === "string" ? request.data.role : "";
