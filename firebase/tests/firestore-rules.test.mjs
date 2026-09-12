@@ -38,8 +38,8 @@ beforeEach(async () => {
       name: 'Grupo Ana',
       ownerUid: 'ana',
       plan: { tier: 'v90', status: 'active' },
-      limits: { instances: 2, users: 5, products: 5000, devices: 3 },
-      usage: { instances: 1, users: 3 },
+      limits: { instances: 2, users: 8, products: 5000, devices: 3 },
+      usage: { instances: 1, users: 3, staff: 1, devices: 1 },
       billing: { stripeCustomerId: 'cus_123' },
     });
     await setDoc(doc(admin, 'accounts', ACCOUNT, 'members', 'ana'), { role: 'owner' });
@@ -48,6 +48,7 @@ beforeEach(async () => {
       name: 'Colmado La Esquina',
       mode: 'colmado',
       active: true,
+      deviceCount: 1,
     });
     await setDoc(doc(admin, 'instances', OTHER_INSTANCE), {
       accountId: 'cuenta2',
@@ -62,8 +63,19 @@ beforeEach(async () => {
       ['pedro', 'waiter'],
       ['coci', 'kitchen'],
     ]) {
-      await setDoc(doc(admin, 'instances', INSTANCE, 'members', uid), { role });
+      await setDoc(doc(admin, 'instances', INSTANCE, 'members', uid), { role, kind: 'user' });
     }
+    // Una caja vinculada sin empleado adentro, y otra con un gerente con sesión abierta.
+    await setDoc(doc(admin, 'instances', INSTANCE, 'members', 'caja1'), { role: 'locked', kind: 'device' });
+    await setDoc(doc(admin, 'instances', INSTANCE, 'members', 'caja2'), {
+      role: 'manager',
+      kind: 'device',
+      staffId: 'emp2',
+    });
+    await setDoc(doc(admin, 'instances', INSTANCE, 'devices', 'caja1'), { name: 'Caja 1', status: 'active' });
+    await setDoc(doc(admin, 'instances', INSTANCE, 'staff', 'emp1'), { name: 'Luis', role: 'cashier', active: true });
+    await setDoc(doc(admin, 'instances', INSTANCE, 'staffSecrets', 'emp1'), { hash: 'abc', salt: 'x', iterations: 1 });
+    await setDoc(doc(admin, 'instances', INSTANCE, 'products', 'p1'), { name: 'Refresco', priceCents: 5900 });
     await setDoc(doc(admin, 'instances', INSTANCE, 'sales', 'venta1'), {
       number: 1,
       status: 'completed',
@@ -90,6 +102,7 @@ beforeEach(async () => {
       role: 'cashier',
       expiresAt: inDays(-1),
     });
+    await setDoc(doc(admin, 'deviceCodes', 'CAJA2345'), { instanceId: INSTANCE, expiresAt: inDays(1) });
   });
 });
 
@@ -113,10 +126,13 @@ describe('separación entre negocios', () => {
 describe('roles dentro de la instancia', () => {
   it('el catálogo lo cambian dueño y gerente', async () => {
     await assertSucceeds(
-      setDoc(doc(db('marta'), 'instances', INSTANCE, 'products', 'p1'), { name: 'Refresco', priceCents: 5900 }),
+      setDoc(doc(db('marta'), 'instances', INSTANCE, 'products', 'p2'), { name: 'Cerveza', priceCents: 9900 }),
+    );
+    await assertSucceeds(
+      setDoc(doc(db('ana'), 'instances', INSTANCE, 'categories', 'c1'), { name: 'Bebidas', sortOrder: 0 }),
     );
     await assertFails(
-      setDoc(doc(db('luis'), 'instances', INSTANCE, 'products', 'p2'), { name: 'Cerveza', priceCents: 9900 }),
+      setDoc(doc(db('luis'), 'instances', INSTANCE, 'products', 'p3'), { name: 'Del cajero', priceCents: 1 }),
     );
     await assertSucceeds(getDoc(doc(db('luis'), 'instances', INSTANCE, 'products', 'p1')));
   });
@@ -156,6 +172,56 @@ describe('roles dentro de la instancia', () => {
     await assertSucceeds(
       updateDoc(doc(db('pedro'), 'instances', INSTANCE, 'orders', 'orden1'), { status: 'closed' }),
     );
+  });
+
+  it('un gerente no cambia quién trabaja aquí; el dueño sí', async () => {
+    await assertFails(
+      updateDoc(doc(db('marta'), 'instances', INSTANCE, 'members', 'luis'), { role: 'owner' }),
+    );
+    await assertFails(
+      updateDoc(doc(db('marta'), 'instances', INSTANCE, 'members', 'marta'), { role: 'owner' }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db('ana'), 'instances', INSTANCE, 'members', 'luis'), { role: 'manager' }),
+    );
+  });
+});
+
+describe('cajas y empleados', () => {
+  it('una caja sin empleado ve el catálogo y el personal, pero no vende', async () => {
+    await assertSucceeds(getDocs(collection(db('caja1'), 'instances', INSTANCE, 'products')));
+    await assertSucceeds(getDocs(collection(db('caja1'), 'instances', INSTANCE, 'staff')));
+    await assertSucceeds(getDoc(doc(db('caja1'), 'instances', INSTANCE, 'settings', 'branding')));
+    await assertFails(
+      setDoc(doc(db('caja1'), 'instances', INSTANCE, 'sales', 'venta4'), { number: 4, status: 'completed' }),
+    );
+  });
+
+  it('una caja con gerente adentro vende, pero no administra personas', async () => {
+    await assertSucceeds(
+      setDoc(doc(db('caja2'), 'instances', INSTANCE, 'sales', 'venta5'), { number: 5, status: 'completed' }),
+    );
+    await assertFails(
+      updateDoc(doc(db('caja2'), 'instances', INSTANCE, 'members', 'luis'), { role: 'owner' }),
+    );
+  });
+
+  it('los PIN no los lee nadie', async () => {
+    await assertFails(getDoc(doc(db('ana'), 'instances', INSTANCE, 'staffSecrets', 'emp1')));
+    await assertFails(getDoc(doc(db('caja1'), 'instances', INSTANCE, 'staffSecrets', 'emp1')));
+    await assertFails(getDocs(collection(db('ana'), 'instances', INSTANCE, 'staffSecrets')));
+  });
+
+  it('empleados, cajas y códigos los maneja el servidor', async () => {
+    await assertFails(
+      setDoc(doc(db('ana'), 'instances', INSTANCE, 'staff', 'emp9'), { name: 'Sin PIN', role: 'owner', active: true }),
+    );
+    await assertFails(
+      updateDoc(doc(db('ana'), 'instances', INSTANCE, 'devices', 'caja1'), { status: 'revoked' }),
+    );
+    await assertFails(getDoc(doc(db('ana'), 'deviceCodes', 'CAJA2345')));
+    await assertFails(setDoc(doc(db('ana'), 'deviceCodes', 'NUEVA234'), { instanceId: INSTANCE }));
+    await assertFails(updateDoc(doc(db('ana'), 'instances', INSTANCE), { deviceCount: 99 }));
   });
 });
 
@@ -226,16 +292,15 @@ describe('instancias e invitaciones', () => {
         active: true,
       }),
     );
-    // Lo que ya existe sí lo administra el dueño.
+    // Lo que ya existe sí lo administra el dueño, sin cambiar su modo ni su cuenta.
     await assertSucceeds(
       updateDoc(doc(db('ana'), 'instances', INSTANCE), { name: 'Colmado La Esquina II' }),
     );
-    await assertFails(
-      updateDoc(doc(db('luis'), 'instances', INSTANCE), { name: 'Del cajero' }),
-    );
+    await assertFails(updateDoc(doc(db('ana'), 'instances', INSTANCE), { mode: 'restaurant' }));
+    await assertFails(updateDoc(doc(db('luis'), 'instances', INSTANCE), { name: 'Del cajero' }));
   });
 
-  it('un empleado entra con una invitación vigente', async () => {
+  it('una persona entra con una invitación vigente', async () => {
     await assertSucceeds(
       setDoc(doc(db('nuevo'), 'instances', INSTANCE, 'members', 'nuevo'), {
         role: 'cashier',
@@ -257,27 +322,15 @@ describe('instancias e invitaciones', () => {
     );
   });
 
-  it('las invitaciones las crea quien manda y duran poco', async () => {
-    await assertSucceeds(
+  it('las invitaciones las crea el servidor', async () => {
+    await assertFails(
       setDoc(doc(db('marta'), 'invites', 'NUEVA001'), {
         instanceId: INSTANCE,
         role: 'waiter',
         expiresAt: inDays(3),
       }),
     );
-    await assertFails(
-      setDoc(doc(db('marta'), 'invites', 'LARGA001'), {
-        instanceId: INSTANCE,
-        role: 'waiter',
-        expiresAt: inDays(30),
-      }),
-    );
-    await assertFails(
-      setDoc(doc(db('luis'), 'invites', 'DELCAJERO'), {
-        instanceId: INSTANCE,
-        role: 'owner',
-        expiresAt: inDays(1),
-      }),
-    );
+    await assertSucceeds(getDoc(doc(db('luis'), 'invites', 'INVITA01')));
+    await assertFails(getDoc(doc(db('luis'), 'invites', 'VENCIDA1')));
   });
 });

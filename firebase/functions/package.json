@@ -2,13 +2,13 @@
   "name": "voxon-functions",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloud Functions de VOXON: cuentas, instancias, topes del plan, resúmenes y cobro",
+  "description": "Cloud Functions de VOXON: cuentas, instancias, cajas, empleados, topes del plan, resúmenes y cobro",
   "main": "lib/index.js",
   "engines": {
     "node": "22"
   },
   "scripts": {
-    "prebuild": "node -e \"require('fs').copyFileSync('../../shared/plans.json','src/plans.json')\"",
+    "prebuild": "node -e \"const fs=require('fs');for(const f of ['plans','modes'])fs.copyFileSync('../../shared/'+f+'.json','src/'+f+'.json')\"",
     "build": "tsc",
     "watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions,firestore,auth",

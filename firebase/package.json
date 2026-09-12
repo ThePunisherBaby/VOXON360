@@ -1,12 +1,12 @@
 {
-  "name": "voxon90-firebase",
+  "name": "voxon-firebase",
   "version": "0.1.0",
   "private": true,
-  "description": "Reglas de Firestore para la app del dueño de VOXON90 y sus pruebas con el emulador",
+  "description": "Reglas, índices y Cloud Functions de VOXON, con sus pruebas contra los emuladores",
   "type": "module",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore --project demo-voxon90 \"node --test tests/*.test.mjs\"",
-    "test:sync": "firebase emulators:exec --only auth,firestore --project demo-voxon90 \"cd ../backend/server && VOXON_FIREBASE_EMULATOR=127.0.0.1 ./gradlew test --tests *CloudEmulatorTest\""
+    "test": "firebase emulators:exec --only firestore --project demo-voxon \"node --test tests/*.test.mjs\"",
+    "test:functions": "npm --prefix functions test && firebase emulators:exec --only auth,firestore,functions --project demo-voxon \"node --test functions/test/*.emulator.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.2",

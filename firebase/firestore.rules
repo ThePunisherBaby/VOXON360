@@ -2,12 +2,15 @@ rules_version = '2';
 
 // VOXON · Reglas multi-tenant.
 //
-//   accounts/{cuenta}        quien paga: plan, topes y facturación (solo las Functions los tocan)
-//   instances/{instancia}    un negocio o sucursal, con su modo (colmado, restaurante, supermercado, tienda)
-//   instances/.../members    empleados de esa instancia y su rol
+//   accounts/{cuenta}             quien paga: plan, topes, uso y facturación (solo las Functions)
+//   instances/{instancia}         un negocio o sucursal con su modo
+//   instances/.../members/{uid}   personas (kind "user") y cajas (kind "device") con su rol
+//   instances/.../staff           empleados con PIN; el hash vive en staffSecrets, que nadie lee
+//   instances/.../devices         cajas con VOXON POS
 //
-// Principio: nadie ve ni escribe fuera de su instancia. El dinero (plan, límites, uso, facturación)
-// solo lo escribe el servidor (Cloud Functions con el SDK de administrador, que se salta estas reglas).
+// Principio: nadie ve ni escribe fuera de su instancia. El dinero, las cajas y los PIN los maneja
+// el servidor (Cloud Functions con el SDK de administrador, que se salta estas reglas). Una caja
+// sin empleado adentro tiene rol "locked": ve los datos pero no vende.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -49,7 +52,25 @@ service cloud.firestore {
       return inInstance(instanceId) && instanceRole(instanceId) in roles;
     }
 
-    // Campos que solo escribe el servidor.
+    // Dueño de la instancia (persona) o dueño/administrador de su cuenta.
+    function isInstanceAdmin(instanceId) {
+      return (hasRole(instanceId, ['owner'])
+          && get(instanceMemberPath(instanceId)).data.get('kind', 'user') != 'device')
+        || isAccountMember(get(instancePath(instanceId)).data.accountId, ['owner', 'admin']);
+    }
+
+    // Lo que ve cualquier miembro de la instancia, cajas incluidas.
+    function readable() {
+      return ['products', 'categories', 'customers', 'tables', 'areas', 'stations', 'settings',
+              'staff', 'devices', 'sales', 'cashSessions', 'orders', 'days'];
+    }
+
+    // Lo que administran el dueño y el gerente directamente.
+    function managed() {
+      return ['products', 'categories', 'customers', 'tables', 'areas', 'stations', 'settings'];
+    }
+
+    // Campos de la cuenta que solo escribe el servidor.
     function serverOnly() {
       return ['plan', 'limits', 'usage', 'billing'];
     }
@@ -77,10 +98,8 @@ service cloud.firestore {
     match /accounts/{accountId} {
       allow get: if isAccountMember(accountId, ['owner', 'admin']);
       allow list: if false;
-
-      // La cuenta la crea la Function createAccount, que fija el plan de prueba.
+      // La crea la Function createAccount, que fija el plan de prueba.
       allow create: if false;
-
       allow update: if isAccountMember(accountId, ['owner', 'admin'])
         && !changedKeys().hasAny(serverOnly())
         && request.resource.data.ownerUid == resource.data.ownerUid;
@@ -92,6 +111,7 @@ service cloud.firestore {
         allow create: if isAccountMember(accountId, ['owner']);
         allow update, delete: if isAccountMember(accountId, ['owner']) && memberUid != uid();
       }
+      // accounts/{cuenta}/people es un conteo interno del servidor: sin acceso para las apps.
     }
 
     // --- Instancias ----------------------------------------------------------
@@ -99,35 +119,37 @@ service cloud.firestore {
     match /instances/{instanceId} {
       allow get: if inInstance(instanceId)
         || isAccountMember(resource.data.accountId, ['owner', 'admin']);
-      // La app busca las instancias donde trabaja el usuario.
+      // Las apps buscan las instancias donde trabaja el usuario.
       allow list: if signedIn();
-
-      // Las crea la Function createInstance, que revisa el tope de negocios del plan.
+      // La crea la Function createInstance, que revisa el tope de negocios del plan.
       allow create: if false;
-
       allow update: if (hasRole(instanceId, ['owner', 'manager'])
           || isAccountMember(resource.data.accountId, ['owner', 'admin']))
-        && request.resource.data.accountId == resource.data.accountId
-        && request.resource.data.mode == resource.data.mode;
+        && !changedKeys().hasAny(['accountId', 'mode', 'deviceCount']);
       allow delete: if false;
 
       match /members/{memberUid} {
         allow read: if inInstance(instanceId);
-        // Se entra con una invitación vigente, o el dueño agrega a mano.
-        allow create: if hasRole(instanceId, ['owner', 'manager'])
-          || isAccountMember(get(instancePath(instanceId)).data.accountId, ['owner', 'admin'])
+        // Solo el dueño decide quién trabaja aquí; o se entra con una invitación vigente.
+        // Las cajas y la sesión de su empleado las manejan las Functions.
+        allow create: if isInstanceAdmin(instanceId)
           || (signedIn() && memberUid == uid()
               && validInvite(instanceId, request.resource.data.inviteCode, request.resource.data.role));
-        allow update, delete: if hasRole(instanceId, ['owner', 'manager'])
-          || isAccountMember(get(instancePath(instanceId)).data.accountId, ['owner', 'admin']);
+        allow update, delete: if isInstanceAdmin(instanceId) && memberUid != uid();
       }
 
-      // Catálogo, clientes, mesas y ajustes: los administra quien manda en la instancia.
       match /{collection}/{documentId} {
-        allow read: if inInstance(instanceId)
-          && collection in ['products', 'customers', 'tables', 'settings', 'sales', 'cashSessions', 'orders', 'days'];
-        allow write: if collection in ['products', 'customers', 'tables', 'settings']
-          && hasRole(instanceId, ['owner', 'manager']);
+        allow read: if inInstance(instanceId) && collection in readable();
+        allow write: if collection in managed() && hasRole(instanceId, ['owner', 'manager']);
+      }
+
+      // Empleados y cajas: por Functions (PIN con hash, topes del plan). staffSecrets no se lee nunca.
+      match /staff/{staffId} {
+        allow write: if false;
+      }
+
+      match /devices/{deviceUid} {
+        allow write: if false;
       }
 
       // Una venta cobrada no se cambia: solo se anula, y eso lo hace el dueño o un gerente.
@@ -162,16 +184,17 @@ service cloud.firestore {
       }
     }
 
-    // --- Invitaciones --------------------------------------------------------
+    // --- Códigos ---------------------------------------------------------------
 
+    // Códigos de caja: solo los crean y canjean las Functions.
+    match /deviceCodes/{code} {
+      allow read, write: if false;
+    }
+
+    // Invitaciones: las crea la Function createInvite; la persona invitada las lee para entrar.
     match /invites/{code} {
       allow get: if signedIn() && resource.data.expiresAt > request.time;
-      allow list: if false;
-      allow create: if hasRole(request.resource.data.instanceId, ['owner', 'manager'])
-        && request.resource.data.role in ['owner', 'manager', 'cashier', 'waiter', 'kitchen']
-        && request.resource.data.expiresAt is timestamp
-        && request.resource.data.expiresAt <= request.time + duration.value(7, 'd');
-      allow update: if false;
+      allow list, create, update: if false;
       allow delete: if hasRole(resource.data.instanceId, ['owner', 'manager']);
     }
   }

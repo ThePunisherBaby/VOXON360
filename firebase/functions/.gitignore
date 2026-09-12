@@ -1,6 +1,9 @@
 node_modules/
 lib/
 package-lock.json
-# Copiado desde shared/plans.json por el script prebuild.
+# Copiados desde shared/ por el script prebuild.
 src/plans.json
+src/modes.json
 *.log
+# Secretos locales para el emulador de Functions.
+.secret.local

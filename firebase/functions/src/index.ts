@@ -1,78 +1,94 @@
 // VOXON · Cloud Functions.
 //
-// Aquí vive lo que la app no puede decidir sola:
+// Lo que las apps no pueden decidir solas:
 //   - crear cuentas e instancias respetando los topes del plan,
-//   - llevar el uso (cuántas instancias y usuarios hay),
-//   - armar el resumen de cada día a partir de las ventas.
-//
-// El cobro con Stripe entra en el siguiente paso.
-import { setGlobalOptions } from "firebase-functions/v2";
+//   - vincular cajas y validar el PIN de los empleados (devices.ts),
+//   - llevar el uso de cada cuenta,
+//   - armar el resumen del día y mover el inventario con cada venta,
+//   - cobrar con Stripe (billing.ts).
+import { logger, setGlobalOptions } from "firebase-functions/v2";
 import { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
+import { cleanName, requireUid, stringParam } from "./common";
 import { DATABASE, db } from "./firestore";
-import { limitsFor, modeConfig, plans, Tier, withinLimit } from "./plans";
+import { limitsFor, modeConfig, plans, withinLimit } from "./plans";
+import { randomCode } from "./security";
 
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 
-// Cobro con Stripe.
 export * from "./billing";
+export * from "./devices";
 
-const INSTANCE_ROLES = ["owner", "manager", "cashier", "waiter", "kitchen"] as const;
+const INSTANCE_ROLES = ["owner", "manager", "cashier", "waiter", "kitchen"];
 
 /** Día local de República Dominicana (UTC-4), como "2026-09-12". */
 function localDay(moment: Date): string {
   return new Date(moment.getTime() - 4 * 3_600_000).toISOString().slice(0, 10);
 }
 
-function requireUid(auth: { uid: string } | undefined): string {
-  if (!auth?.uid) {
-    throw new HttpsError("unauthenticated", "Entra con tu cuenta primero");
-  }
-  return auth.uid;
-}
-
-function cleanName(value: unknown, field: string): string {
-  const name = typeof value === "string" ? value.trim() : "";
-  if (name.length < 1 || name.length > 80) {
-    throw new HttpsError("invalid-argument", `Escribe ${field} (hasta 80 caracteres)`);
-  }
-  return name;
-}
-
+/** Modo que se puede elegir hoy: los "planned" todavía no están listos. */
 function requireMode(value: unknown): string {
-  const mode = typeof value === "string" ? value : "";
-  if (!modeConfig(mode)) {
+  const mode = stringParam(value);
+  const config = modeConfig(mode);
+  if (!config) {
     throw new HttpsError("invalid-argument", "Elige un modo de negocio válido");
+  }
+  if (config.status === "planned") {
+    throw new HttpsError("failed-precondition", `El modo ${config.name} estará disponible pronto`);
   }
   return mode;
 }
 
-/** Datos iniciales de una instancia según su modo (ITBIS incluido, propina legal...). */
-function instanceDefaults(accountId: string, name: string, mode: string) {
+type Write = (ref: FirebaseFirestore.DocumentReference, data: FirebaseFirestore.DocumentData) => void;
+
+/** Instancia nueva según su modo: módulos, reglas fiscales, marca, categorías y estaciones. */
+function writeInstance(
+  write: Write,
+  instanceRef: FirebaseFirestore.DocumentReference,
+  accountId: string,
+  name: string,
+  mode: string,
+  ownerUid: string,
+): void {
   const config = modeConfig(mode)!;
-  return {
+  const now = FieldValue.serverTimestamp();
+  write(instanceRef, {
     accountId,
     name,
     mode,
     active: true,
-    createdAt: FieldValue.serverTimestamp(),
+    createdAt: now,
+    deviceCount: 0,
+    modules: config.modules,
     fiscal: { rnc: null, priceMode: config.priceMode, legalTip: config.legalTip },
-  };
+  });
+  write(instanceRef.collection("members").doc(ownerUid), { role: "owner", kind: "user", createdAt: now });
+  write(instanceRef.collection("settings").doc("branding"), {
+    displayName: name,
+    primaryColor: config.color,
+    logoDataUrl: null,
+    receiptFooter: "¡Gracias por su compra!",
+  });
+  config.categories.forEach((category, index) =>
+    write(instanceRef.collection("categories").doc(), { name: category, sortOrder: index, active: true }),
+  );
+  (config.stations ?? []).forEach((station, index) =>
+    write(instanceRef.collection("stations").doc(), { name: station, sortOrder: index }),
+  );
 }
 
 // --- Cuentas e instancias ----------------------------------------------------
 
 /** Primer paso del cliente: su cuenta con prueba gratis y su primer negocio. */
-// Las funciones que llama la app son públicas para Google; la sesión la revisa el código.
 export const createAccount = onCall({ invoker: "public" }, async (request) => {
   const uid = requireUid(request.auth);
   const accountName = cleanName(request.data?.accountName, "el nombre de tu cuenta");
   const instanceName = cleanName(request.data?.instanceName, "el nombre de tu negocio");
   const mode = requireMode(request.data?.mode);
 
-  const tier: Tier = "v45";
+  const tier = plans.trialTier;
   const accountRef = db.collection("accounts").doc();
   const instanceRef = db.collection("instances").doc();
   const trialEndsAt = Timestamp.fromMillis(Date.now() + plans.trialDays * 86_400_000);
@@ -84,18 +100,14 @@ export const createAccount = onCall({ invoker: "public" }, async (request) => {
     createdAt: FieldValue.serverTimestamp(),
     plan: { tier, status: "trial", source: "trial", trialEndsAt, currentPeriodEnd: trialEndsAt },
     limits: limitsFor(tier),
-    // A los usuarios, dueño incluido, los cuenta onMemberAdded.
-    usage: { instances: 1, users: 0 },
+    // Las personas con cuenta las cuenta onMemberAdded; los empleados, saveStaff; las cajas, enrollDevice.
+    usage: { instances: 1, users: 0, staff: 0, devices: 0 },
   });
   batch.set(accountRef.collection("members").doc(uid), {
     role: "owner",
     createdAt: FieldValue.serverTimestamp(),
   });
-  batch.set(instanceRef, instanceDefaults(accountRef.id, instanceName, mode));
-  batch.set(instanceRef.collection("members").doc(uid), {
-    role: "owner",
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  writeInstance((ref, data) => batch.set(ref, data), instanceRef, accountRef.id, instanceName, mode, uid);
   await batch.commit();
 
   return { accountId: accountRef.id, instanceId: instanceRef.id };
@@ -104,9 +116,12 @@ export const createAccount = onCall({ invoker: "public" }, async (request) => {
 /** Un negocio más dentro de la cuenta, si el plan lo permite. */
 export const createInstance = onCall({ invoker: "public" }, async (request) => {
   const uid = requireUid(request.auth);
-  const accountId = typeof request.data?.accountId === "string" ? request.data.accountId : "";
+  const accountId = stringParam(request.data?.accountId);
   const name = cleanName(request.data?.name, "el nombre del negocio");
   const mode = requireMode(request.data?.mode);
+  if (!accountId) {
+    throw new HttpsError("invalid-argument", "Falta la cuenta");
+  }
 
   const accountRef = db.doc(`accounts/${accountId}`);
   const member = await accountRef.collection("members").doc(uid).get();
@@ -120,19 +135,15 @@ export const createInstance = onCall({ invoker: "public" }, async (request) => {
     if (!account.exists) {
       throw new HttpsError("not-found", "La cuenta no existe");
     }
-    const limits = account.get("limits") ?? limitsFor(account.get("plan.tier") as Tier);
-    const used = (account.get("usage.instances") ?? 0) + 1;
+    const limits = account.get("limits") ?? limitsFor(account.get("plan.tier"));
+    const used = Number(account.get("usage.instances") ?? 0) + 1;
     if (!withinLimit(used, limits.instances)) {
       throw new HttpsError(
         "failed-precondition",
         `Tu plan permite ${limits.instances} negocio(s). Sube de plan para abrir otro.`,
       );
     }
-    transaction.set(instanceRef, instanceDefaults(accountId, name, mode));
-    transaction.set(instanceRef.collection("members").doc(uid), {
-      role: "owner",
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    writeInstance((ref, data) => transaction.set(ref, data), instanceRef, accountId, name, mode, uid);
     transaction.update(accountRef, { "usage.instances": FieldValue.increment(1) });
   });
 
@@ -144,7 +155,7 @@ export const createInstance = onCall({ invoker: "public" }, async (request) => {
 /**
  * Una persona cuenta como un solo usuario aunque trabaje en varias instancias de la
  * cuenta: accounts/{cuenta}/people/{uid} guarda en cuántas está, y usage.users solo
- * cambia cuando pasa de 0 a 1 o de 1 a 0.
+ * cambia cuando pasa de 0 a 1 o de 1 a 0. Las cajas no son personas.
  */
 async function changeMembership(instanceId: string, uid: string, delta: number): Promise<void> {
   const instance = await db.doc(`instances/${instanceId}`).get();
@@ -173,33 +184,25 @@ async function changeMembership(instanceId: string, uid: string, delta: number):
 
 export const onMemberAdded = onDocumentCreated(
   { document: "instances/{instanceId}/members/{uid}", database: DATABASE },
-  (event) => changeMembership(event.params.instanceId, event.params.uid, 1),
+  async (event) => {
+    if (event.data?.data()?.kind === "device") {
+      return;
+    }
+    await changeMembership(event.params.instanceId, event.params.uid, 1);
+  },
 );
 
 export const onMemberRemoved = onDocumentDeleted(
   { document: "instances/{instanceId}/members/{uid}", database: DATABASE },
-  (event) => changeMembership(event.params.instanceId, event.params.uid, -1),
+  async (event) => {
+    if (event.data?.data()?.kind === "device") {
+      return;
+    }
+    await changeMembership(event.params.instanceId, event.params.uid, -1);
+  },
 );
 
-// --- Resumen del día ---------------------------------------------------------
-
-interface SaleTotals {
-  count: number;
-  totalCents: number;
-  taxCents: number;
-  tipCents: number;
-  discountCents: number;
-}
-
-function totalsOf(sale: FirebaseFirestore.DocumentData, sign: number): SaleTotals {
-  return {
-    count: sign,
-    totalCents: sign * Number(sale.totalCents ?? 0),
-    taxCents: sign * Number(sale.taxCents ?? 0),
-    tipCents: sign * Number(sale.tipCents ?? 0),
-    discountCents: sign * Number(sale.discountCents ?? 0),
-  };
-}
+// --- Resumen del día e inventario ----------------------------------------------
 
 /** Cobros netos por método: al efectivo se le resta el vuelto. */
 function paymentsOf(sale: FirebaseFirestore.DocumentData, sign: number): Record<string, number> {
@@ -213,25 +216,20 @@ function paymentsOf(sale: FirebaseFirestore.DocumentData, sign: number): Record<
   return payments;
 }
 
-/** Suma (o resta, al anular) una venta en el documento del día. */
-async function applySale(
-  instanceId: string,
-  sale: FirebaseFirestore.DocumentData,
-  sign: number,
-): Promise<void> {
+/** Suma (o resta, al anular) una venta en el día y mueve el inventario de sus productos. */
+async function applySale(instanceId: string, sale: FirebaseFirestore.DocumentData, sign: number): Promise<void> {
   const createdAt: Date = sale.createdAt?.toDate?.() ?? new Date();
   const day = localDay(createdAt);
-  const totals = totalsOf(sale, sign);
 
   const update: FirebaseFirestore.DocumentData = {
     day,
     updatedAt: FieldValue.serverTimestamp(),
     sales: {
-      count: FieldValue.increment(totals.count),
-      totalCents: FieldValue.increment(totals.totalCents),
-      taxCents: FieldValue.increment(totals.taxCents),
-      tipCents: FieldValue.increment(totals.tipCents),
-      discountCents: FieldValue.increment(totals.discountCents),
+      count: FieldValue.increment(sign),
+      totalCents: FieldValue.increment(sign * Number(sale.totalCents ?? 0)),
+      taxCents: FieldValue.increment(sign * Number(sale.taxCents ?? 0)),
+      tipCents: FieldValue.increment(sign * Number(sale.tipCents ?? 0)),
+      discountCents: FieldValue.increment(sign * Number(sale.discountCents ?? 0)),
     },
     payments: Object.fromEntries(
       Object.entries(paymentsOf(sale, sign)).map(([method, amount]) => [method, FieldValue.increment(amount)]),
@@ -244,6 +242,25 @@ async function applySale(
     };
   }
   await db.doc(`instances/${instanceId}/days/${day}`).set(update, { merge: true });
+
+  // Inventario: vender descuenta y anular devuelve. Una presentación (una caja de 20)
+  // descuenta del producto base con su factor.
+  const lines: FirebaseFirestore.DocumentData[] = Array.isArray(sale.lines) ? sale.lines : [];
+  const stockMoves = lines
+    .filter((line) => line.trackStock === true && typeof (line.stockProductId ?? line.productId) === "string")
+    .map((line) => {
+      const productId: string = line.stockProductId ?? line.productId;
+      const quantity = Number(line.quantityMilli ?? 0) * Number(line.stockFactor ?? 1);
+      return db
+        .doc(`instances/${instanceId}/products/${productId}`)
+        .update({ stockMilli: FieldValue.increment(-sign * quantity) });
+    });
+  const results = await Promise.allSettled(stockMoves);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      logger.warn("No se pudo mover el inventario de un producto", { instanceId, error: `${result.reason}` });
+    }
+  }
 }
 
 export const onSaleCreated = onDocumentCreated(
@@ -271,37 +288,33 @@ export const onSaleVoided = onDocumentUpdated(
 
 // --- Invitaciones ------------------------------------------------------------
 
-/** Deja la invitación lista para que el empleado entre con el código. */
+/** Invitación para que otra persona con cuenta entre a VOXON 360 en esta instancia. */
 export const createInvite = onCall({ invoker: "public" }, async (request) => {
   const uid = requireUid(request.auth);
-  const instanceId = typeof request.data?.instanceId === "string" ? request.data.instanceId : "";
-  const role = typeof request.data?.role === "string" ? request.data.role : "";
-  if (!(INSTANCE_ROLES as readonly string[]).includes(role)) {
-    throw new HttpsError("invalid-argument", "Elige un puesto válido");
+  const instanceId = stringParam(request.data?.instanceId);
+  const role = stringParam(request.data?.role);
+  if (!instanceId || !INSTANCE_ROLES.includes(role)) {
+    throw new HttpsError("invalid-argument", "Elige el negocio y un puesto válido");
   }
 
   const member = await db.doc(`instances/${instanceId}/members/${uid}`).get();
-  if (!member.exists || !["owner", "manager"].includes(member.get("role"))) {
-    throw new HttpsError("permission-denied", "Solo el dueño o un gerente invitan empleados");
+  const callerRole = member.exists && member.get("kind") !== "device" ? member.get("role") : null;
+  if (!["owner", "manager"].includes(callerRole)) {
+    throw new HttpsError("permission-denied", "Solo el dueño o un gerente invitan personas");
+  }
+  if (["owner", "manager"].includes(role) && callerRole !== "owner") {
+    throw new HttpsError("permission-denied", "Solo el dueño invita dueños o gerentes");
   }
 
-  const account = await db.doc(`instances/${instanceId}`).get();
-  const accountRef = db.doc(`accounts/${account.get("accountId")}`);
-  const accountSnapshot = await accountRef.get();
-  const limits = accountSnapshot.get("limits");
-  const used = (accountSnapshot.get("usage.users") ?? 0) + 1;
+  const instance = await db.doc(`instances/${instanceId}`).get();
+  const account = await db.doc(`accounts/${instance.get("accountId")}`).get();
+  const limits = account.get("limits");
+  const used = Number(account.get("usage.users") ?? 0) + Number(account.get("usage.staff") ?? 0) + 1;
   if (limits && !withinLimit(used, limits.users)) {
-    throw new HttpsError(
-      "failed-precondition",
-      `Tu plan permite ${limits.users} usuarios. Sube de plan para agregar más.`,
-    );
+    throw new HttpsError("failed-precondition", `Tu plan permite ${limits.users} usuarios. Sube de plan para agregar más.`);
   }
 
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 8; i++) {
-    code += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
-  }
+  const code = randomCode();
   await db.doc(`invites/${code}`).set({
     instanceId,
     role,

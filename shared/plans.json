@@ -1,8 +1,9 @@
 {
-  "$comment": "Única fuente de los planes: la app (Dart) y las Cloud Functions (TypeScript) leen este archivo. Los precios son provisionales y se confirman antes de publicar en Stripe.",
+  "$comment": "Única fuente de los planes: las apps (Dart) y las Cloud Functions (TypeScript) leen este archivo. Los precios son provisionales y se confirman antes de publicar en Stripe. Los modos de negocio están en modes.json.",
   "provisionalPrices": true,
   "currency": "USD",
   "trialDays": 14,
+  "trialTier": "v90",
   "features": {
     "sales": "Vender, cobrar y ticket",
     "cash": "Apertura y cierre de caja con cuadre",
@@ -14,6 +15,7 @@
     "purchases": "Compras a suplidores",
     "ncf": "Comprobantes fiscales (NCF) y formatos 606/607",
     "backups": "Respaldos y exportables",
+    "posDevices": "Cajas con VOXON POS y la marca del negocio",
     "branches": "Varias sucursales con reportes juntos",
     "shifts": "Empleados por turno y control de acceso",
     "advancedReports": "Comparativos, márgenes y tendencias",
@@ -23,37 +25,20 @@
     "integrations": "Integraciones (delivery, contabilidad)",
     "priority": "Soporte prioritario"
   },
+  "$limits": "0 significa sin tope. users cuenta administradores con cuenta y empleados con PIN; devices cuenta cajas con VOXON POS.",
   "tiers": {
     "v45": {
       "name": "VOXON 45",
-      "tagline": "Vender desde el celular",
+      "tagline": "Vender desde un solo equipo",
       "priceMonthly": 9,
-      "limits": { "instances": 1, "users": 2, "products": 300, "devices": 1 },
+      "limits": { "instances": 1, "users": 2, "products": 300, "devices": 0 },
       "features": ["sales", "cash", "customers", "dayReport"]
     },
     "v90": {
       "name": "VOXON 90",
       "tagline": "El negocio completo",
       "priceMonthly": 19,
-      "limits": { "instances": 2, "users": 5, "products": 5000, "devices": 3 },
-      "features": [
-        "sales",
-        "cash",
-        "customers",
-        "dayReport",
-        "inventory",
-        "credit",
-        "restaurant",
-        "purchases",
-        "ncf",
-        "backups"
-      ]
-    },
-    "v180": {
-      "name": "VOXON 180",
-      "tagline": "Varias sucursales",
-      "priceMonthly": 39,
-      "limits": { "instances": 5, "users": 20, "products": 50000, "devices": 10 },
+      "limits": { "instances": 2, "users": 8, "products": 5000, "devices": 3 },
       "features": [
         "sales",
         "cash",
@@ -65,6 +50,26 @@
         "purchases",
         "ncf",
         "backups",
+        "posDevices"
+      ]
+    },
+    "v180": {
+      "name": "VOXON 180",
+      "tagline": "Varias sucursales",
+      "priceMonthly": 39,
+      "limits": { "instances": 5, "users": 30, "products": 50000, "devices": 10 },
+      "features": [
+        "sales",
+        "cash",
+        "customers",
+        "dayReport",
+        "inventory",
+        "credit",
+        "restaurant",
+        "purchases",
+        "ncf",
+        "backups",
+        "posDevices",
         "branches",
         "shifts",
         "advancedReports",
@@ -87,6 +92,7 @@
         "purchases",
         "ncf",
         "backups",
+        "posDevices",
         "branches",
         "shifts",
         "advancedReports",
@@ -97,12 +103,5 @@
         "priority"
       ]
     }
-  },
-  "$limits": "0 significa sin tope.",
-  "modes": {
-    "colmado": { "name": "Colmado o minimercado", "priceMode": "tax_included", "legalTip": false },
-    "restaurant": { "name": "Restaurante o bar", "priceMode": "tax_excluded", "legalTip": true },
-    "supermarket": { "name": "Supermercado", "priceMode": "tax_included", "legalTip": false },
-    "store": { "name": "Tienda (tecnología, ropa, repuestos)", "priceMode": "tax_included", "legalTip": false }
   }
 }
