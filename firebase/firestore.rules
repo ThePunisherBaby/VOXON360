@@ -78,15 +78,8 @@ service cloud.firestore {
       allow get: if isAccountMember(accountId, ['owner', 'admin']);
       allow list: if false;
 
-      // La cuenta nace en prueba; el plan pagado lo escribe el servidor tras el cobro.
-      allow create: if signedIn()
-        && request.resource.data.ownerUid == uid()
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 80
-        && request.resource.data.plan.tier == 'v45'
-        && request.resource.data.plan.status == 'trial'
-        && !('billing' in request.resource.data);
+      // La cuenta la crea la Function createAccount, que fija el plan de prueba.
+      allow create: if false;
 
       allow update: if isAccountMember(accountId, ['owner', 'admin'])
         && !changedKeys().hasAny(serverOnly())
@@ -95,11 +88,8 @@ service cloud.firestore {
 
       match /members/{memberUid} {
         allow read: if isAccountMember(accountId, ['owner', 'admin']) || (signedIn() && memberUid == uid());
-        // El dueño de la cuenta administra a sus administradores; el primer dueño lo crea al registrarse.
-        allow create: if isAccountMember(accountId, ['owner'])
-          || (signedIn() && memberUid == uid()
-              && request.resource.data.role == 'owner'
-              && get(/databases/$(database)/documents/accounts/$(accountId)).data.ownerUid == uid());
+        // El dueño agrega administradores; el primer dueño lo crea createAccount.
+        allow create: if isAccountMember(accountId, ['owner']);
         allow update, delete: if isAccountMember(accountId, ['owner']) && memberUid != uid();
       }
     }
@@ -112,12 +102,8 @@ service cloud.firestore {
       // La app busca las instancias donde trabaja el usuario.
       allow list: if signedIn();
 
-      allow create: if isAccountMember(request.resource.data.accountId, ['owner', 'admin'])
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 80
-        && request.resource.data.mode in ['colmado', 'restaurant', 'supermarket', 'store']
-        && request.resource.data.active == true;
+      // Las crea la Function createInstance, que revisa el tope de negocios del plan.
+      allow create: if false;
 
       allow update: if (hasRole(instanceId, ['owner', 'manager'])
           || isAccountMember(resource.data.accountId, ['owner', 'admin']))

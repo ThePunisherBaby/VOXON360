@@ -198,25 +198,11 @@ describe('el dinero lo maneja el servidor', () => {
     await assertSucceeds(updateDoc(doc(db('ana'), 'accounts', ACCOUNT), { name: 'Grupo Ana SRL' }));
   });
 
-  it('la cuenta nueva nace en prueba y sin facturación', async () => {
-    await assertSucceeds(
+  it('las cuentas las crea el servidor, no el cliente', async () => {
+    await assertFails(
       setDoc(doc(db('nueva'), 'accounts', 'cuenta3'), {
         name: 'Bar La Última',
         ownerUid: 'nueva',
-        plan: { tier: 'v45', status: 'trial' },
-      }),
-    );
-    await assertFails(
-      setDoc(doc(db('nueva'), 'accounts', 'cuenta4'), {
-        name: 'Trampa',
-        ownerUid: 'nueva',
-        plan: { tier: 'v360', status: 'active' },
-      }),
-    );
-    await assertFails(
-      setDoc(doc(db('nueva'), 'accounts', 'cuenta5'), {
-        name: 'Trampa',
-        ownerUid: 'ana',
         plan: { tier: 'v45', status: 'trial' },
       }),
     );
@@ -231,8 +217,8 @@ describe('el dinero lo maneja el servidor', () => {
 });
 
 describe('instancias e invitaciones', () => {
-  it('solo la cuenta crea instancias, con un modo válido', async () => {
-    await assertSucceeds(
+  it('las instancias las crea el servidor, para respetar el tope del plan', async () => {
+    await assertFails(
       setDoc(doc(db('ana'), 'instances', 'negocio3'), {
         accountId: ACCOUNT,
         name: 'Sucursal 2',
@@ -240,21 +226,12 @@ describe('instancias e invitaciones', () => {
         active: true,
       }),
     );
-    await assertFails(
-      setDoc(doc(db('ana'), 'instances', 'negocio4'), {
-        accountId: ACCOUNT,
-        name: 'Rara',
-        mode: 'casino',
-        active: true,
-      }),
+    // Lo que ya existe sí lo administra el dueño.
+    await assertSucceeds(
+      updateDoc(doc(db('ana'), 'instances', INSTANCE), { name: 'Colmado La Esquina II' }),
     );
     await assertFails(
-      setDoc(doc(db('luis'), 'instances', 'negocio5'), {
-        accountId: ACCOUNT,
-        name: 'Del cajero',
-        mode: 'store',
-        active: true,
-      }),
+      updateDoc(doc(db('luis'), 'instances', INSTANCE), { name: 'Del cajero' }),
     );
   });
 

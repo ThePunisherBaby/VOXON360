@@ -1,0 +1,6 @@
+node_modules/
+lib/
+package-lock.json
+# Copiado desde shared/plans.json por el script prebuild.
+src/plans.json
+*.log
