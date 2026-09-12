@@ -110,6 +110,23 @@ beforeEach(async () => {
       instanceName: 'Colmado La Esquina',
     });
     await setDoc(doc(admin, 'pairings', 'vinculo1', 'secrets', 'codes'), { mobileCodeHash: 'abc' });
+    await setDoc(doc(admin, 'users', 'ana', 'instances', INSTANCE), {
+      accountId: ACCOUNT,
+      name: 'Colmado La Esquina',
+      mode: 'colmado',
+      role: 'owner',
+    });
+  });
+});
+
+describe('los negocios de cada persona', () => {
+  it('cada quien ve su propia lista y nadie la escribe', async () => {
+    await assertSucceeds(getDocs(collection(db('ana'), 'users', 'ana', 'instances')));
+    await assertFails(getDocs(collection(db('luis'), 'users', 'ana', 'instances')));
+    await assertFails(getDoc(doc(db(null), 'users', 'ana', 'instances', INSTANCE)));
+    await assertFails(
+      setDoc(doc(db('ana'), 'users', 'ana', 'instances', 'negocio9'), { name: 'Inventado', role: 'owner' }),
+    );
   });
 });
 

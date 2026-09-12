@@ -138,6 +138,11 @@ describe('un restaurante con cajas VOXON POS', () => {
     const branding = await getDoc(`instances/${instanceId}/settings/branding`);
     assert.equal(branding.displayName, 'La Fonda');
     assert.equal(branding.primaryColor, '#C62828');
+
+    const listed = await getDoc(`users/${state.owner.uid}/instances/${instanceId}`, state.owner.token);
+    assert.equal(listed.name, 'La Fonda', 'VOXON 360 lista el negocio del dueño');
+    assert.equal(listed.role, 'owner');
+    assert.equal(listed.mode, 'restaurant');
   });
 
   it('un modo que todavía no está listo no se puede elegir', async () => {

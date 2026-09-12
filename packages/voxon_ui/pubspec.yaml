@@ -1,5 +1,6 @@
 name: voxon_ui
 description: "Tema con la marca del negocio y pantallas de operación compartidas"
+publish_to: none
 version: 0.0.1
 homepage:
 

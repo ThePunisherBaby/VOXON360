@@ -184,6 +184,14 @@ service cloud.firestore {
       }
     }
 
+    // --- Personas -------------------------------------------------------------
+
+    // Negocios donde trabaja cada persona: índice que mantienen las Functions.
+    match /users/{userId}/instances/{instanceId} {
+      allow read: if signedIn() && userId == uid();
+      allow write: if false;
+    }
+
     // --- Códigos ---------------------------------------------------------------
 
     // Vinculación por QR: la caja y quien escaneó siguen el estado en vivo. El token del QR y

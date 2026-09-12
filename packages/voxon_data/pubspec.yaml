@@ -1,5 +1,6 @@
 name: voxon_data
 description: "Datos de VOXON en Firebase: sesión, instancias, catálogo, ventas y cajas"
+publish_to: none
 version: 0.0.1
 homepage:
 

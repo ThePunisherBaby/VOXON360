@@ -66,6 +66,14 @@ function writeInstance(
     fiscal: { rnc: null, priceMode: config.priceMode, legalTip: config.legalTip },
   });
   write(instanceRef.collection("members").doc(ownerUid), { role: "owner", kind: "user", createdAt: now });
+  // Índice para que VOXON 360 muestre el negocio apenas se crea (los disparadores lo mantienen después).
+  write(db.doc(`users/${ownerUid}/instances/${instanceRef.id}`), {
+    accountId,
+    name,
+    mode,
+    role: "owner",
+    updatedAt: now,
+  });
   write(instanceRef.collection("settings").doc("branding"), {
     displayName: name,
     primaryColor: config.color,
@@ -183,13 +191,45 @@ async function changeMembership(instanceId: string, uid: string, delta: number):
   });
 }
 
+/** users/{uid}/instances: los negocios donde trabaja cada persona, para que VOXON 360 los liste. */
+async function writeUserIndex(instanceId: string, uid: string, role: string): Promise<void> {
+  const instance = await db.doc(`instances/${instanceId}`).get();
+  if (!instance.exists) {
+    return;
+  }
+  await db.doc(`users/${uid}/instances/${instanceId}`).set({
+    accountId: instance.get("accountId"),
+    name: instance.get("name"),
+    mode: instance.get("mode"),
+    role,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+}
+
 export const onMemberAdded = onDocumentCreated(
   { document: "instances/{instanceId}/members/{uid}", database: DATABASE },
   async (event) => {
-    if (event.data?.data()?.kind === "device") {
+    const member = event.data?.data();
+    if (!member || member.kind === "device") {
       return;
     }
-    await changeMembership(event.params.instanceId, event.params.uid, 1);
+    await Promise.all([
+      changeMembership(event.params.instanceId, event.params.uid, 1),
+      writeUserIndex(event.params.instanceId, event.params.uid, member.role),
+    ]);
+  },
+);
+
+/** Si a una persona le cambian el puesto, se refleja en su lista de negocios. */
+export const onMemberUpdated = onDocumentUpdated(
+  { document: "instances/{instanceId}/members/{uid}", database: DATABASE },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after || after.kind === "device" || before.role === after.role) {
+      return;
+    }
+    await writeUserIndex(event.params.instanceId, event.params.uid, after.role);
   },
 );
 
@@ -199,7 +239,34 @@ export const onMemberRemoved = onDocumentDeleted(
     if (event.data?.data()?.kind === "device") {
       return;
     }
-    await changeMembership(event.params.instanceId, event.params.uid, -1);
+    await Promise.all([
+      changeMembership(event.params.instanceId, event.params.uid, -1),
+      db.doc(`users/${event.params.uid}/instances/${event.params.instanceId}`).delete(),
+    ]);
+  },
+);
+
+/** Si el negocio cambia de nombre, se actualiza en la lista de cada persona. */
+export const onInstanceUpdated = onDocumentUpdated(
+  { document: "instances/{instanceId}", database: DATABASE },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after || before.name === after.name) {
+      return;
+    }
+    const members = await db.collection(`instances/${event.params.instanceId}/members`).get();
+    const batch = db.batch();
+    for (const member of members.docs) {
+      if (member.get("kind") !== "device") {
+        batch.set(
+          db.doc(`users/${member.id}/instances/${event.params.instanceId}`),
+          { name: after.name, updatedAt: FieldValue.serverTimestamp() },
+          { merge: true },
+        );
+      }
+    }
+    await batch.commit();
   },
 );
 

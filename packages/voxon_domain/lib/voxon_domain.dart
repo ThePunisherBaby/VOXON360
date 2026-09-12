@@ -2,6 +2,8 @@
 /// servidor para que los montos se calculen igual en todas partes.
 library;
 
+export 'package:voxon_domain/src/catalog/modes.dart';
+export 'package:voxon_domain/src/catalog/plans.dart';
 export 'package:voxon_domain/src/discount.dart';
 export 'package:voxon_domain/src/money.dart';
 export 'package:voxon_domain/src/payment.dart';
