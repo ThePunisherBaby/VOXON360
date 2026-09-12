@@ -9,18 +9,15 @@
 import { setGlobalOptions } from "firebase-functions/v2";
 import { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { initializeApp } from "firebase-admin/app";
-import { FieldValue, getFirestore, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
+import { DATABASE, db } from "./firestore";
 import { limitsFor, modeConfig, plans, Tier, withinLimit } from "./plans";
 
-/** Base con nombre del proyecto (no es la "(default)"). */
-const DATABASE = "voxon360";
-
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
-initializeApp();
 
-const db = getFirestore(DATABASE);
+// Cobro con Stripe.
+export * from "./billing";
 
 const INSTANCE_ROLES = ["owner", "manager", "cashier", "waiter", "kitchen"] as const;
 
