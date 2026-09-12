@@ -1,9 +1,10 @@
 // Cajas (VOXON POS) y empleados con PIN.
 //
-// Una caja se vincula con un código que genera VOXON 360. La caja entra a Firebase como usuario
-// anónimo y queda como miembro "device" de la instancia con rol "locked": ve los datos, pero no
-// vende hasta que un empleado entra con su PIN. El PIN se valida aquí, contra un hash que ninguna
-// app puede leer, y el rol del empleado pasa a la sesión de la caja hasta que sale.
+// Una caja se vincula con QR y doble código (pairing.ts) o con un código escrito que genera
+// VOXON 360. Entra a Firebase como usuario anónimo y queda como miembro "device" de la instancia
+// con rol "locked": ve los datos, pero no vende hasta que un empleado entra con su PIN. El PIN se
+// valida aquí, contra un hash que ninguna app puede leer, y el rol del empleado pasa a la sesión de
+// la caja hasta que sale.
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
@@ -20,14 +21,14 @@ const DEVICE_CODE = /^[A-HJ-NP-Z2-9]{8}$/;
 
 type Snapshot = FirebaseFirestore.DocumentSnapshot;
 
-interface InstanceAdmin {
+export interface InstanceAdmin {
   instance: Snapshot;
   /** Dueño de la instancia o dueño/administrador de la cuenta: puede dar puestos altos. */
   isOwner: boolean;
 }
 
 /** Dueño o gerente de la instancia (con su cuenta, no desde una caja) o administrador de la cuenta. */
-async function requireInstanceAdmin(instanceId: string, uid: string): Promise<InstanceAdmin> {
+export async function requireInstanceAdmin(instanceId: string, uid: string): Promise<InstanceAdmin> {
   if (!instanceId) {
     throw new HttpsError("invalid-argument", "Falta el negocio");
   }
@@ -56,7 +57,7 @@ function planOf(account: Snapshot): { tier: Tier; limits: Limits } {
 }
 
 /** Revisa que el plan tenga cajas y que quepa una más. */
-function requireDeviceRoom(account: Snapshot): void {
+export function requireDeviceRoom(account: Snapshot): void {
   const { tier, limits } = planOf(account);
   if (!hasFeature(tier, "posDevices")) {
     throw new HttpsError(
@@ -70,9 +71,76 @@ function requireDeviceRoom(account: Snapshot): void {
   }
 }
 
-// --- Cajas -------------------------------------------------------------------
+export interface Enrollment {
+  /** uid anónimo de la caja. */
+  uid: string;
+  instanceId: string;
+  accountId: string;
+  name: string;
+  platform: string;
+  /** Cómo se vinculó: "qr" o "code". */
+  source: string;
+}
 
-/** VOXON 360 pide un código para instalar una caja nueva. */
+export interface EnrolledDevice {
+  instanceId: string;
+  instanceName: string;
+  mode: string;
+  deviceName: string;
+  deviceNumber: number;
+}
+
+/**
+ * Vincula la caja dentro de una transacción ya abierta: hace sus lecturas antes de escribir,
+ * así quien la llama puede leer lo suyo primero y escribir lo suyo después.
+ */
+export async function enrollInTransaction(
+  transaction: FirebaseFirestore.Transaction,
+  enrollment: Enrollment,
+): Promise<EnrolledDevice> {
+  const instanceRef = db.doc(`instances/${enrollment.instanceId}`);
+  const accountRef = db.doc(`accounts/${enrollment.accountId}`);
+  const memberRef = instanceRef.collection("members").doc(enrollment.uid);
+  const [instance, account, member] = await Promise.all([
+    transaction.get(instanceRef),
+    transaction.get(accountRef),
+    transaction.get(memberRef),
+  ]);
+  if (!instance.exists || instance.get("active") !== true) {
+    throw new HttpsError("failed-precondition", "Ese negocio no está activo");
+  }
+  if (member.exists) {
+    throw new HttpsError("already-exists", "Este equipo ya está vinculado a ese negocio");
+  }
+  requireDeviceRoom(account);
+
+  const now = FieldValue.serverTimestamp();
+  const number = Number(instance.get("deviceCount") ?? 0) + 1;
+  transaction.set(instanceRef.collection("devices").doc(enrollment.uid), {
+    name: enrollment.name,
+    platform: enrollment.platform,
+    number,
+    status: "active",
+    enrolledAt: now,
+    enrolledWith: enrollment.source,
+    lastSeenAt: now,
+  });
+  transaction.set(memberRef, { role: "locked", kind: "device", deviceNumber: number, createdAt: now });
+  transaction.update(instanceRef, { deviceCount: FieldValue.increment(1) });
+  transaction.update(accountRef, { "usage.devices": FieldValue.increment(1) });
+
+  return {
+    instanceId: enrollment.instanceId,
+    instanceName: instance.get("name"),
+    mode: instance.get("mode"),
+    deviceName: enrollment.name,
+    deviceNumber: number,
+  };
+}
+
+// --- Cajas con código escrito ------------------------------------------------
+
+/** VOXON 360 pide un código para instalar una caja nueva (cuando no hay celular a mano). */
 export const createDeviceCode = onCall({ invoker: "public" }, async (request) => {
   const uid = requireUid(request.auth);
   const instanceId = stringParam(request.data?.instanceId);
@@ -111,46 +179,16 @@ export const enrollDevice = onCall({ invoker: "public" }, async (request) => {
     if (!codeSnapshot.exists || codeSnapshot.get("usedAt") || !expiresAt || expiresAt.toMillis() < Date.now()) {
       throw new HttpsError("not-found", "Ese código no existe, ya se usó o venció. Genera otro en VOXON 360.");
     }
-    const instanceId: string = codeSnapshot.get("instanceId");
-    const instanceRef = db.doc(`instances/${instanceId}`);
-    const accountRef = db.doc(`accounts/${codeSnapshot.get("accountId")}`);
-    const memberRef = instanceRef.collection("members").doc(uid);
-    const [instance, account, member] = await Promise.all([
-      transaction.get(instanceRef),
-      transaction.get(accountRef),
-      transaction.get(memberRef),
-    ]);
-    if (!instance.exists || instance.get("active") !== true) {
-      throw new HttpsError("failed-precondition", "Ese negocio no está activo");
-    }
-    if (member.exists) {
-      throw new HttpsError("already-exists", "Este equipo ya está vinculado a ese negocio");
-    }
-    requireDeviceRoom(account);
-
-    const now = FieldValue.serverTimestamp();
-    const number = Number(instance.get("deviceCount") ?? 0) + 1;
-    transaction.set(instanceRef.collection("devices").doc(uid), {
+    const enrolled = await enrollInTransaction(transaction, {
+      uid,
+      instanceId: codeSnapshot.get("instanceId"),
+      accountId: codeSnapshot.get("accountId"),
       name: codeSnapshot.get("name"),
       platform,
-      number,
-      status: "active",
-      enrolledAt: now,
-      enrolledWith: code,
-      lastSeenAt: now,
+      source: "code",
     });
-    transaction.set(memberRef, { role: "locked", kind: "device", deviceNumber: number, createdAt: now });
-    transaction.update(instanceRef, { deviceCount: FieldValue.increment(1) });
-    transaction.update(accountRef, { "usage.devices": FieldValue.increment(1) });
-    transaction.update(codeRef, { usedAt: now, usedBy: uid });
-
-    return {
-      instanceId,
-      instanceName: instance.get("name"),
-      mode: instance.get("mode"),
-      deviceName: codeSnapshot.get("name"),
-      deviceNumber: number,
-    };
+    transaction.update(codeRef, { usedAt: FieldValue.serverTimestamp(), usedBy: uid });
+    return enrolled;
   });
 });
 
@@ -249,7 +287,7 @@ export const saveStaff = onCall({ invoker: "public" }, async (request) => {
   return { staffId: staffRef.id };
 });
 
-/** Caja vinculada que no tiene sesión abierta de otro negocio. */
+/** Caja vinculada y activa en esa instancia. */
 async function requireDevice(instanceId: string, uid: string): Promise<{ member: Snapshot; device: Snapshot }> {
   if (!instanceId) {
     throw new HttpsError("invalid-argument", "Falta el negocio");

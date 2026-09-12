@@ -3,7 +3,33 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { CODE_ALPHABET, hashPin, isValidPin, randomCode, verifyPin } from '../lib/security.js';
+import {
+  CODE_ALPHABET,
+  hashPin,
+  isValidPin,
+  randomCode,
+  randomDigits,
+  randomToken,
+  sha256Hex,
+  verifyPin,
+} from '../lib/security.js';
+
+test('los códigos de la vinculación son de 6 números y el QR lleva un token largo', () => {
+  const seen = new Set();
+  for (let i = 0; i < 500; i++) {
+    const digits = randomDigits(6);
+    assert.match(digits, /^\d{6}$/);
+    seen.add(digits);
+  }
+  assert.ok(seen.size > 490, 'casi nunca deberían repetirse');
+  const token = randomToken();
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(randomToken(), token);
+});
+
+test('sha256 coincide con el vector conocido', () => {
+  assert.equal(sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+});
 
 test('el PIN tiene de 4 a 6 números', () => {
   assert.equal(isValidPin('1234'), true);

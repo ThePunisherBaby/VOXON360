@@ -20,6 +20,7 @@ setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 
 export * from "./billing";
 export * from "./devices";
+export * from "./pairing";
 
 const INSTANCE_ROLES = ["owner", "manager", "cashier", "waiter", "kitchen"];
 

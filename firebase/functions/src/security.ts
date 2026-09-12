@@ -1,4 +1,4 @@
-import { pbkdf2Sync, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, pbkdf2Sync, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 
 /** Iteraciones de PBKDF2-HMAC-SHA256 para los PIN nuevos. */
 export const PIN_ITERATIONS = 60_000;
@@ -28,6 +28,24 @@ export function verifyPin(pin: string, stored: PinHash): boolean {
   const candidate = pbkdf2Sync(pin, stored.salt, stored.iterations, 32, "sha256");
   const expected = Buffer.from(stored.hash, "hex");
   return expected.length === candidate.length && timingSafeEqual(candidate, expected);
+}
+
+/** Números al azar para dictar, como "048213". */
+export function randomDigits(length = 6): string {
+  let digits = "";
+  for (let i = 0; i < length; i++) {
+    digits += String(randomInt(10));
+  }
+  return digits;
+}
+
+/** Token largo e imposible de adivinar para el QR (base64url). */
+export function randomToken(bytes = 32): string {
+  return randomBytes(bytes).toString("base64url");
+}
+
+export function sha256Hex(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
 }
 
 /** Código aleatorio criptográfico con el alfabeto sin caracteres confusos. */

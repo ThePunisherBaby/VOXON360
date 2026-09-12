@@ -275,6 +275,19 @@ describe('un restaurante con cajas VOXON POS', () => {
     assert.match(extra.error.message, /3 cajas/);
   });
 
+  it('alguien de fuera no vincula cajas con QR a un negocio ajeno', async () => {
+    const pos = await signUp(null);
+    const { pairingId, qrToken } = await callOk('startPairing', pos.token, { platform: 'windows' });
+    const stranger = await signUp(`intruso-${Date.now()}@example.com`);
+    const claim = await call('claimPairing', stranger.token, {
+      pairingId,
+      qrToken,
+      instanceId: state.instanceId,
+      name: 'Intrusa',
+    });
+    assert.equal(claim.error?.status, 'PERMISSION_DENIED');
+  });
+
   it('alguien de fuera no administra cajas ni empleados', async () => {
     const stranger = await signUp(`extrano-${Date.now()}@example.com`);
     const code = await call('createDeviceCode', stranger.token, { instanceId: state.instanceId, name: 'Intrusa' });
@@ -286,5 +299,111 @@ describe('un restaurante con cajas VOXON POS', () => {
       pin: '0000',
     });
     assert.equal(staff.error?.status, 'PERMISSION_DENIED');
+  });
+});
+
+describe('vincular una caja con QR y doble código', () => {
+  const state = {};
+
+  before(async () => {
+    state.owner = await signUp(`colmado-${Date.now()}@example.com`);
+    const { instanceId } = await callOk('createAccount', state.owner.token, {
+      accountName: 'Don Pedro',
+      instanceName: 'Colmado Don Pedro',
+      mode: 'colmado',
+    });
+    state.instanceId = instanceId;
+  });
+
+  it('caja → QR → celular da el código A → caja da el código B → vinculada', async () => {
+    const pos = await signUp(null);
+    const started = await callOk('startPairing', pos.token, { platform: 'android' });
+    assert.ok(started.qr.includes(started.pairingId));
+    assert.equal((await getDoc(`pairings/${started.pairingId}`, pos.token)).status, 'waiting');
+
+    const badQr = await call('claimPairing', state.owner.token, {
+      pairingId: started.pairingId,
+      qrToken: 'foto-borrosa',
+      instanceId: state.instanceId,
+      name: 'Caja mostrador',
+    });
+    assert.equal(badQr.error?.status, 'PERMISSION_DENIED');
+
+    const claimed = await callOk('claimPairing', state.owner.token, {
+      pairingId: started.pairingId,
+      qrToken: started.qrToken,
+      instanceId: state.instanceId,
+      name: 'Caja mostrador',
+    });
+    assert.match(claimed.mobileCode, /^\d{6}$/);
+    const seenByPos = await getDoc(`pairings/${started.pairingId}`, pos.token);
+    assert.equal(seenByPos.status, 'claimed');
+    assert.equal(seenByPos.instanceName, 'Colmado Don Pedro');
+    assert.ok((await getDoc(`pairings/${started.pairingId}/secrets/codes`, pos.token))?.denied);
+
+    const again = await call('claimPairing', state.owner.token, {
+      pairingId: started.pairingId,
+      qrToken: started.qrToken,
+      instanceId: state.instanceId,
+    });
+    assert.equal(again.error?.status, 'FAILED_PRECONDITION', 'el mismo QR no se reclama dos veces');
+
+    const wrongA = await call('confirmPairingOnDevice', pos.token, { pairingId: started.pairingId, code: '000000' });
+    assert.equal(wrongA.error?.status, 'PERMISSION_DENIED');
+    const confirmed = await callOk('confirmPairingOnDevice', pos.token, {
+      pairingId: started.pairingId,
+      code: claimed.mobileCode,
+    });
+    assert.match(confirmed.posCode, /^\d{6}$/);
+
+    const wrongB = await call('completePairing', state.owner.token, { pairingId: started.pairingId, code: '000000' });
+    assert.equal(wrongB.error?.status, 'PERMISSION_DENIED');
+    const linked = await callOk('completePairing', state.owner.token, {
+      pairingId: started.pairingId,
+      code: confirmed.posCode,
+    });
+    assert.equal(linked.instanceId, state.instanceId);
+    assert.equal(linked.deviceName, 'Caja mostrador');
+    assert.equal(linked.deviceNumber, 1);
+
+    assert.equal((await getDoc(`pairings/${started.pairingId}`, pos.token)).status, 'linked');
+    const member = await getDoc(`instances/${state.instanceId}/members/${pos.uid}`);
+    assert.equal(member.kind, 'device');
+    assert.equal(member.role, 'locked');
+    assert.equal((await getDoc(`instances/${state.instanceId}/devices/${pos.uid}`)).enrolledWith, 'qr');
+    const catalog = await getDoc(`instances/${state.instanceId}/settings/branding`, pos.token);
+    assert.equal(catalog.displayName, 'Colmado Don Pedro', 'la caja vinculada ya ve la marca del negocio');
+  });
+
+  it('cinco códigos incorrectos tumban la vinculación', async () => {
+    const pos = await signUp(null);
+    const started = await callOk('startPairing', pos.token, { platform: 'windows' });
+    await callOk('claimPairing', state.owner.token, {
+      pairingId: started.pairingId,
+      qrToken: started.qrToken,
+      instanceId: state.instanceId,
+    });
+    let last;
+    for (let i = 0; i < 5; i++) {
+      last = await call('confirmPairingOnDevice', pos.token, { pairingId: started.pairingId, code: '111111' });
+    }
+    assert.match(last.error.message, /Demasiados/);
+    assert.equal((await getDoc(`pairings/${started.pairingId}`, pos.token)).status, 'failed');
+  });
+
+  it('la caja no puede confirmar la vinculación de otra caja', async () => {
+    const pos = await signUp(null);
+    const other = await signUp(null);
+    const started = await callOk('startPairing', pos.token, { platform: 'windows' });
+    const claimed = await callOk('claimPairing', state.owner.token, {
+      pairingId: started.pairingId,
+      qrToken: started.qrToken,
+      instanceId: state.instanceId,
+    });
+    const stolen = await call('confirmPairingOnDevice', other.token, {
+      pairingId: started.pairingId,
+      code: claimed.mobileCode,
+    });
+    assert.equal(stolen.error?.status, 'PERMISSION_DENIED');
   });
 });

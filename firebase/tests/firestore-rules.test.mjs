@@ -103,6 +103,30 @@ beforeEach(async () => {
       expiresAt: inDays(-1),
     });
     await setDoc(doc(admin, 'deviceCodes', 'CAJA2345'), { instanceId: INSTANCE, expiresAt: inDays(1) });
+    await setDoc(doc(admin, 'pairings', 'vinculo1'), {
+      deviceUid: 'cajaNueva',
+      claimedBy: 'ana',
+      status: 'claimed',
+      instanceName: 'Colmado La Esquina',
+    });
+    await setDoc(doc(admin, 'pairings', 'vinculo1', 'secrets', 'codes'), { mobileCodeHash: 'abc' });
+  });
+});
+
+describe('vincular una caja con QR', () => {
+  it('la caja y quien escaneó siguen el estado; nadie más', async () => {
+    await assertSucceeds(getDoc(doc(db('cajaNueva'), 'pairings', 'vinculo1')));
+    await assertSucceeds(getDoc(doc(db('ana'), 'pairings', 'vinculo1')));
+    await assertFails(getDoc(doc(db('luis'), 'pairings', 'vinculo1')));
+    await assertFails(getDoc(doc(db(null), 'pairings', 'vinculo1')));
+    await assertFails(getDocs(collection(db('ana'), 'pairings')));
+  });
+
+  it('los códigos con hash no los lee ni la caja ni el celular, y nadie escribe', async () => {
+    await assertFails(getDoc(doc(db('cajaNueva'), 'pairings', 'vinculo1', 'secrets', 'codes')));
+    await assertFails(getDoc(doc(db('ana'), 'pairings', 'vinculo1', 'secrets', 'codes')));
+    await assertFails(updateDoc(doc(db('cajaNueva'), 'pairings', 'vinculo1'), { status: 'linked' }));
+    await assertFails(setDoc(doc(db('cajaNueva'), 'pairings', 'vinculo2'), { deviceUid: 'cajaNueva' }));
   });
 });
 

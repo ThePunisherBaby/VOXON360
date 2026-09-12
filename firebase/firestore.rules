@@ -186,6 +186,18 @@ service cloud.firestore {
 
     // --- Códigos ---------------------------------------------------------------
 
+    // Vinculación por QR: la caja y quien escaneó siguen el estado en vivo. El token del QR y
+    // los códigos viven con hash en secrets, sin acceso para ninguna app.
+    match /pairings/{pairingId} {
+      allow get: if signedIn()
+        && (resource.data.deviceUid == uid() || resource.data.claimedBy == uid());
+      allow list, create, update, delete: if false;
+
+      match /secrets/{secret} {
+        allow read, write: if false;
+      }
+    }
+
     // Códigos de caja: solo los crean y canjean las Functions.
     match /deviceCodes/{code} {
       allow read, write: if false;
