@@ -1,0 +1,18 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - lib/l10n/app_localizations*.dart
+    - "**/*.g.dart"
+    # Cada paquete de packages/ tiene su propio análisis.
+    - packages/**
+  language:
+    strict-casts: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    always_declare_return_types: true
+    prefer_final_locals: true
+    prefer_single_quotes: true
+    unawaited_futures: true

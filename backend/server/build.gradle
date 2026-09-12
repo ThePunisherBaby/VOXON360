@@ -1,0 +1,57 @@
+// Servidor local de VOXON90: expone el motor C++ (por JNI) a los equipos de
+// la red del negocio. Sin dependencias en tiempo de ejecución, solo el JDK.
+
+plugins {
+    id 'application'
+}
+
+group = 'com.voxon'
+version = '0.1.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+    options.compilerArgs += ['-Xlint:all', '-Werror']
+}
+
+// Carpeta donde CMake deja libvoxoncore (backend/core/build por defecto).
+def coreLibraryDir = providers.gradleProperty('voxonCoreDir').orElse("${projectDir}/../core/build").get()
+def webDir = "${projectDir}/../web"
+
+application {
+    mainClass = 'com.voxon.server.Main'
+    applicationDefaultJvmArgs = ["-Djava.library.path=${coreLibraryDir}", "-Dvoxon.web.dir=${webDir}"]
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // Si cambia la biblioteca nativa, las pruebas deben volver a correr.
+    inputs.files(fileTree(coreLibraryDir) { include '*voxoncore*' }).withPropertyName('nativeCore')
+    systemProperty 'java.library.path', coreLibraryDir
+    systemProperty 'voxon.web.dir', webDir
+    testLogging {
+        events 'failed'
+        exceptionFormat = 'full'
+    }
+}
+
+tasks.named('jar') {
+    manifest {
+        attributes 'Main-Class': 'com.voxon.server.Main', 'Implementation-Version': project.version
+    }
+}

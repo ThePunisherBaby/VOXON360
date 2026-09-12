@@ -1,0 +1,8 @@
+# Los scripts deben conservar sus finales de línea en cualquier sistema.
+*.sh text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Código de terceros incluido tal cual.
+backend/core/third_party/** -diff linguist-vendored

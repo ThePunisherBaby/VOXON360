@@ -1,0 +1,258 @@
+{
+  "@@locale": "es",
+  "appTitle": "VOXON90",
+  "@appTitle": {
+    "description": "Nombre visible de la aplicación."
+  },
+  "navHome": "Inicio",
+  "navSettings": "Ajustes",
+  "homeTitle": "Bienvenido a VOXON90",
+  "homeSubtitle": "La base del proyecto está lista. Aquí se construirán las funciones de la aplicación.",
+  "homeEnvironment": "Entorno",
+  "homePlatform": "Plataforma",
+  "settingsAppearance": "Apariencia",
+  "settingsLanguage": "Idioma",
+  "themeSystem": "Sistema",
+  "themeLight": "Claro",
+  "themeDark": "Oscuro",
+  "languageSystem": "Sistema",
+  "notFoundTitle": "Página no encontrada",
+  "notFoundAction": "Volver al inicio",
+  "connectTitle": "Conectar con la caja principal",
+  "connectSubtitle": "Busca el equipo donde corre VOXON90 en el WiFi del negocio. No se necesita internet.",
+  "connectSearching": "Buscando en la red…",
+  "connectSearchAgain": "Buscar de nuevo",
+  "connectNoneFound": "No se encontró ninguna caja principal. Revisa que esté encendida y en el mismo WiFi.",
+  "connectManualLabel": "Dirección (IP o IP:puerto)",
+  "connectManualAction": "Conectar",
+  "connectInvalidAddress": "Escribe una dirección válida, por ejemplo 192.168.1.10",
+  "connectUnnamedBusiness": "Negocio sin configurar",
+  "loginTitle": "Entra con tu PIN",
+  "loginAction": "Entrar",
+  "loginDelete": "Borrar",
+  "loginPinLength": "El PIN tiene de 4 a 6 dígitos",
+  "loginChangeServer": "Cambiar de caja principal",
+  "setupTitle": "Configura tu negocio",
+  "setupSubtitle": "Todo se guarda en la caja principal, sin internet.",
+  "setupBusinessName": "Nombre del negocio",
+  "setupBusinessType": "Tipo de negocio",
+  "businessTypeColmado": "Colmado",
+  "businessTypeStore": "Tienda",
+  "businessTypeRestaurant": "Restaurante",
+  "setupRnc": "RNC o cédula (opcional)",
+  "setupOwnerSection": "Dueño",
+  "setupOwnerName": "Tu nombre",
+  "setupOwnerPin": "PIN de 4 a 6 dígitos",
+  "setupAction": "Guardar y empezar",
+  "fieldRequired": "Este campo es obligatorio",
+  "offlineTitle": "Sin conexión con la caja principal",
+  "retry": "Reintentar",
+  "navSell": "Vender",
+  "navTables": "Mesas",
+  "navKitchen": "Cocina",
+  "navSummary": "Resumen",
+  "logout": "Salir",
+  "sessionExpired": "Tu sesión terminó. Entra de nuevo con tu PIN.",
+  "settingsServer": "Caja principal",
+  "settingsSession": "Sesión",
+  "roleOwner": "Dueño",
+  "roleManager": "Gerente",
+  "roleCashier": "Cajero",
+  "roleWaiter": "Mesero",
+  "roleKitchen": "Cocina",
+  "loading": "Cargando…",
+  "invalidAmount": "Monto inválido",
+  "sellSearchHint": "Buscar producto o escanear código",
+  "sellNoProducts": "No hay productos que coincidan",
+  "sellCurrentSale": "Venta actual",
+  "sellEmptyCart": "Agrega productos para vender",
+  "sellProductsTab": "Productos",
+  "sellSaleTab": "Venta ({count})",
+  "@sellSaleTab": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "sellStockLeft": "Quedan {quantity}",
+  "@sellStockLeft": {
+    "placeholders": {
+      "quantity": {"type": "String"}
+    }
+  },
+  "sellSubtotal": "Subtotal",
+  "sellTax": "ITBIS",
+  "sellTip": "Propina legal",
+  "sellTotal": "Total",
+  "sellRemove": "Quitar",
+  "sellWholeUnits": "Este producto se vende por unidades enteras",
+  "sellInvalidQuantity": "Cantidad inválida",
+  "paymentCash": "Efectivo",
+  "paymentCard": "Tarjeta",
+  "paymentTransfer": "Transferencia",
+  "paymentCredit": "Fiao",
+  "sellReceived": "Efectivo recibido",
+  "sellChange": "Devuelta: {amount}",
+  "@sellChange": {
+    "placeholders": {
+      "amount": {"type": "String"}
+    }
+  },
+  "sellMissing": "Faltan {amount}",
+  "@sellMissing": {
+    "placeholders": {
+      "amount": {"type": "String"}
+    }
+  },
+  "sellCharge": "Cobrar {amount}",
+  "@sellCharge": {
+    "placeholders": {
+      "amount": {"type": "String"}
+    }
+  },
+  "sellCharged": "Venta #{number} cobrada",
+  "@sellCharged": {
+    "placeholders": {
+      "number": {"type": "int"}
+    }
+  },
+  "sellNewSale": "Nueva venta",
+  "sellInsufficientCash": "El efectivo recibido no cubre el total",
+  "sellCustomerSearch": "Buscar cliente por nombre o teléfono",
+  "sellChooseCustomer": "Elige el cliente del fiao",
+  "sellCreditTo": "Fiao a {name} · disponible {amount}",
+  "@sellCreditTo": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "amount": {"type": "String"}
+    }
+  },
+  "sellChangeCustomer": "Cambiar",
+  "cashOpenTitle": "Abrir caja",
+  "cashOpenHint": "¿Con cuánto efectivo empiezas?",
+  "summaryTitle": "Resumen del {day}",
+  "@summaryTitle": {
+    "placeholders": {
+      "day": {"type": "String"}
+    }
+  },
+  "summarySales": "Ventas",
+  "summaryTickets": "{count} tickets · promedio {amount}",
+  "@summaryTickets": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "amount": {"type": "String"}
+    }
+  },
+  "summaryTaxCollected": "ITBIS cobrado",
+  "summaryReceivables": "Fiao por cobrar",
+  "summaryVoided": "Anuladas",
+  "summaryOpenOrders": "Órdenes abiertas",
+  "summaryTopProducts": "Lo más vendido hoy",
+  "summaryNoSales": "Todavía no hay ventas hoy",
+  "summaryLowStock": "Bajo el mínimo",
+  "summaryStockOk": "Inventario en orden",
+  "summaryDebtors": "Clientes que deben",
+  "summaryNoDebtors": "Nadie debe",
+  "summaryPayments": "Cobros de hoy",
+  "summaryRegister": "Caja",
+  "cashClosedHint": "La caja está cerrada. Se abre desde Vender.",
+  "cashExpected": "Debe haber {amount} en efectivo",
+  "@cashExpected": {
+    "placeholders": {
+      "amount": {"type": "String"}
+    }
+  },
+  "cashCounted": "Efectivo contado",
+  "cashCloseAction": "Cerrar caja",
+  "cashClosedExact": "Caja cerrada: cuadró exacto",
+  "cashClosedDifference": "Caja cerrada con diferencia de {amount}",
+  "@cashClosedDifference": {
+    "placeholders": {
+      "amount": {"type": "String"}
+    }
+  },
+  "backupAction": "Hacer respaldo",
+  "backupDone": "Respaldo guardado en {path}",
+  "@backupDone": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "kitchenAll": "Todo",
+  "kitchenStationKitchen": "Cocina",
+  "kitchenStationBar": "Bar",
+  "kitchenEmpty": "No hay nada pendiente. ¡Todo al día!",
+  "kitchenMinutes": "{minutes} min",
+  "@kitchenMinutes": {
+    "placeholders": {
+      "minutes": {"type": "int"}
+    }
+  },
+  "statusPending": "Sin enviar",
+  "statusSent": "Nuevo",
+  "statusPreparing": "Preparando",
+  "statusReady": "Listo",
+  "statusServed": "Servido",
+  "statusCancelled": "Cancelado",
+  "orderTakeout": "Para llevar",
+  "orderDelivery": "Delivery",
+  "tablesFree": "Libre",
+  "tablesOrder": "Orden #{number} · {waiter}",
+  "@tablesOrder": {
+    "placeholders": {
+      "number": {"type": "int"},
+      "waiter": {"type": "String"}
+    }
+  },
+  "tablesItems": "{count} productos · {amount}",
+  "@tablesItems": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "amount": {"type": "String"}
+    }
+  },
+  "tablesEmpty": "No hay mesas registradas",
+  "tablesAdd": "Agregar mesa",
+  "tablesNewName": "Nombre de la mesa",
+  "tablesOtherOrders": "Para llevar y delivery",
+  "tablesSelectHint": "Toca una mesa para ver o abrir su orden",
+  "orderAddProduct": "Agregar producto",
+  "orderAddProductsHint": "Busca y agrega productos",
+  "orderServedBy": "Atiende {name}",
+  "@orderServedBy": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "orderSend": "Enviar {count} a cocina",
+  "@orderSend": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "orderNothingToSend": "Nada por enviar",
+  "orderSent": "Comanda enviada",
+  "orderBill": "Cuenta",
+  "orderCharge": "Cobrar cuenta",
+  "orderCharged": "Cuenta cobrada: {amount}",
+  "@orderCharged": {
+    "placeholders": {
+      "amount": {"type": "String"}
+    }
+  },
+  "settingsCloud": "App del dueño",
+  "cloudNotConfigured": "Esta caja arrancó sin Firebase. Para ver tus datos en el celular, inicia el servidor con --firebase-project y --firebase-api-key.",
+  "cloudLinkHint": "En la app VOXON90 Dueño toca «Vincular caja» y escribe aquí el código que aparece.",
+  "cloudCodeLabel": "Código de vínculo",
+  "cloudLinkAction": "Vincular",
+  "cloudUnlinkAction": "Desvincular",
+  "cloudLinked": "Vinculada con la app del dueño",
+  "cloudStateOk": "Datos al día · {time}",
+  "@cloudStateOk": {
+    "placeholders": {
+      "time": {"type": "String"}
+    }
+  },
+  "cloudStatePending": "Pendiente de subir",
+  "cloudStateOffline": "Sin internet: se sube cuando vuelva la conexión"
+}

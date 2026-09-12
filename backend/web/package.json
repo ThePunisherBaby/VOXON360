@@ -1,0 +1,13 @@
+{
+  "name": "voxon90-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cliente web local de VOXON90 (sin dependencias ni internet)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.mjs\""
+  }
+}

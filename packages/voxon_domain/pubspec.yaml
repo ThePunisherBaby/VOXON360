@@ -1,0 +1,10 @@
+name: voxon_domain
+description: Reglas de negocio de VOXON90 en Dart puro (dinero, ITBIS, propina, pagos), compartidas por la app y el servidor.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.12.0
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.32.0
