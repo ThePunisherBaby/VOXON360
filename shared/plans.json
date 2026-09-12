@@ -1,0 +1,108 @@
+{
+  "$comment": "Única fuente de los planes: la app (Dart) y las Cloud Functions (TypeScript) leen este archivo. Los precios son provisionales y se confirman antes de publicar en Stripe.",
+  "provisionalPrices": true,
+  "currency": "USD",
+  "trialDays": 14,
+  "features": {
+    "sales": "Vender, cobrar y ticket",
+    "cash": "Apertura y cierre de caja con cuadre",
+    "customers": "Clientes",
+    "dayReport": "Resumen del día",
+    "inventory": "Inventario con costo promedio y mínimos",
+    "credit": "Fiao con límite y abonos",
+    "restaurant": "Mesas, comandas y cocina",
+    "purchases": "Compras a suplidores",
+    "ncf": "Comprobantes fiscales (NCF) y formatos 606/607",
+    "backups": "Respaldos y exportables",
+    "branches": "Varias sucursales con reportes juntos",
+    "shifts": "Empleados por turno y control de acceso",
+    "advancedReports": "Comparativos, márgenes y tendencias",
+    "costs": "Costos y rentabilidad por producto",
+    "api": "API para integrar otros sistemas",
+    "multiCompany": "Varias empresas en una cuenta",
+    "integrations": "Integraciones (delivery, contabilidad)",
+    "priority": "Soporte prioritario"
+  },
+  "tiers": {
+    "v45": {
+      "name": "VOXON 45",
+      "tagline": "Vender desde el celular",
+      "priceMonthly": 9,
+      "limits": { "instances": 1, "users": 2, "products": 300, "devices": 1 },
+      "features": ["sales", "cash", "customers", "dayReport"]
+    },
+    "v90": {
+      "name": "VOXON 90",
+      "tagline": "El negocio completo",
+      "priceMonthly": 19,
+      "limits": { "instances": 2, "users": 5, "products": 5000, "devices": 3 },
+      "features": [
+        "sales",
+        "cash",
+        "customers",
+        "dayReport",
+        "inventory",
+        "credit",
+        "restaurant",
+        "purchases",
+        "ncf",
+        "backups"
+      ]
+    },
+    "v180": {
+      "name": "VOXON 180",
+      "tagline": "Varias sucursales",
+      "priceMonthly": 39,
+      "limits": { "instances": 5, "users": 20, "products": 50000, "devices": 10 },
+      "features": [
+        "sales",
+        "cash",
+        "customers",
+        "dayReport",
+        "inventory",
+        "credit",
+        "restaurant",
+        "purchases",
+        "ncf",
+        "backups",
+        "branches",
+        "shifts",
+        "advancedReports",
+        "costs"
+      ]
+    },
+    "v360": {
+      "name": "VOXON 360",
+      "tagline": "Cadena o empresa",
+      "priceMonthly": 79,
+      "limits": { "instances": 0, "users": 0, "products": 0, "devices": 0 },
+      "features": [
+        "sales",
+        "cash",
+        "customers",
+        "dayReport",
+        "inventory",
+        "credit",
+        "restaurant",
+        "purchases",
+        "ncf",
+        "backups",
+        "branches",
+        "shifts",
+        "advancedReports",
+        "costs",
+        "api",
+        "multiCompany",
+        "integrations",
+        "priority"
+      ]
+    }
+  },
+  "$limits": "0 significa sin tope.",
+  "modes": {
+    "colmado": { "name": "Colmado o minimercado", "priceMode": "tax_included", "legalTip": false },
+    "restaurant": { "name": "Restaurante o bar", "priceMode": "tax_excluded", "legalTip": true },
+    "supermarket": { "name": "Supermercado", "priceMode": "tax_included", "legalTip": false },
+    "store": { "name": "Tienda (tecnología, ropa, repuestos)", "priceMode": "tax_included", "legalTip": false }
+  }
+}

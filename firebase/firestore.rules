@@ -1,84 +1,192 @@
 rules_version = '2';
 
-// VOXON90 · Datos que la caja principal sube para la app del dueño.
+// VOXON · Reglas multi-tenant.
 //
-// - El dueño entra a su app con Firebase Auth, crea su negocio y genera códigos de vínculo.
-// - La caja principal entra como usuario anónimo, se registra como equipo del negocio con un
-//   código vigente y desde entonces solo escribe los resúmenes (days y snapshots) de ese negocio.
-// - Solo los dueños leen los datos. Vender nunca depende de Firebase: todo pasa primero en la caja.
+//   accounts/{cuenta}        quien paga: plan, topes y facturación (solo las Functions los tocan)
+//   instances/{instancia}    un negocio o sucursal, con su modo (colmado, restaurante, supermercado, tienda)
+//   instances/.../members    empleados de esa instancia y su rol
+//
+// Principio: nadie ve ni escribe fuera de su instancia. El dinero (plan, límites, uso, facturación)
+// solo lo escribe el servidor (Cloud Functions con el SDK de administrador, que se salta estas reglas).
 service cloud.firestore {
   match /databases/{database}/documents {
+
     function signedIn() {
       return request.auth != null;
     }
 
-    function businessPath(businessId) {
-      return /databases/$(database)/documents/businesses/$(businessId);
+    function uid() {
+      return request.auth.uid;
     }
 
-    function isOwner(businessId) {
+    function accountMemberPath(accountId) {
+      return /databases/$(database)/documents/accounts/$(accountId)/members/$(uid());
+    }
+
+    function instancePath(instanceId) {
+      return /databases/$(database)/documents/instances/$(instanceId);
+    }
+
+    function instanceMemberPath(instanceId) {
+      return /databases/$(database)/documents/instances/$(instanceId)/members/$(uid());
+    }
+
+    function isAccountMember(accountId, roles) {
       return signedIn()
-        && exists(businessPath(businessId))
-        && request.auth.uid in get(businessPath(businessId)).data.ownerUids;
+        && exists(accountMemberPath(accountId))
+        && get(accountMemberPath(accountId)).data.role in roles;
     }
 
-    function isDevice(businessId) {
-      return signedIn()
-        && exists(/databases/$(database)/documents/businesses/$(businessId)/devices/$(request.auth.uid));
+    function instanceRole(instanceId) {
+      return get(instanceMemberPath(instanceId)).data.role;
     }
 
-    function validLinkCode(businessId, code) {
-      let linkPath = /databases/$(database)/documents/linkCodes/$(code);
+    function inInstance(instanceId) {
+      return signedIn() && exists(instanceMemberPath(instanceId));
+    }
+
+    function hasRole(instanceId, roles) {
+      return inInstance(instanceId) && instanceRole(instanceId) in roles;
+    }
+
+    // Campos que solo escribe el servidor.
+    function serverOnly() {
+      return ['plan', 'limits', 'usage', 'billing'];
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function invitePath(code) {
+      return /databases/$(database)/documents/invites/$(code);
+    }
+
+    // Invitación vigente para esa instancia y ese rol.
+    function validInvite(instanceId, code, role) {
+      let invite = invitePath(code);
       return code is string
-        && exists(linkPath)
-        && get(linkPath).data.businessId == businessId
-        && get(linkPath).data.expiresAt > request.time;
+        && exists(invite)
+        && get(invite).data.instanceId == instanceId
+        && get(invite).data.role == role
+        && get(invite).data.expiresAt > request.time;
     }
 
-    match /businesses/{businessId} {
-      allow read: if signedIn() && request.auth.uid in resource.data.ownerUids;
+    // --- Cuentas -------------------------------------------------------------
+
+    match /accounts/{accountId} {
+      allow get: if isAccountMember(accountId, ['owner', 'admin']);
+      allow list: if false;
+
+      // La cuenta nace en prueba; el plan pagado lo escribe el servidor tras el cobro.
       allow create: if signedIn()
-        && request.resource.data.ownerUids == [request.auth.uid]
+        && request.resource.data.ownerUid == uid()
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 80;
-      allow update: if signedIn()
-        && request.auth.uid in resource.data.ownerUids
-        && request.resource.data.ownerUids == resource.data.ownerUids;
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.plan.tier == 'v45'
+        && request.resource.data.plan.status == 'trial'
+        && !('billing' in request.resource.data);
+
+      allow update: if isAccountMember(accountId, ['owner', 'admin'])
+        && !changedKeys().hasAny(serverOnly())
+        && request.resource.data.ownerUid == resource.data.ownerUid;
       allow delete: if false;
 
-      // Cajas principales vinculadas. El dueño puede quitar una para revocarla.
-      match /devices/{deviceUid} {
-        allow read: if isOwner(businessId) || (signedIn() && request.auth.uid == deviceUid);
-        allow create: if signedIn()
-          && request.auth.uid == deviceUid
-          && validLinkCode(businessId, request.resource.data.linkCode);
-        allow update: if false;
-        allow delete: if isOwner(businessId) || (signedIn() && request.auth.uid == deviceUid);
-      }
-
-      match /days/{day} {
-        allow read: if isOwner(businessId);
-        allow write: if isDevice(businessId) && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
-      }
-
-      match /snapshots/{name} {
-        allow read: if isOwner(businessId);
-        allow write: if isDevice(businessId) && name in ['status', 'cash', 'inventory', 'receivables'];
+      match /members/{memberUid} {
+        allow read: if isAccountMember(accountId, ['owner', 'admin']) || (signedIn() && memberUid == uid());
+        // El dueño de la cuenta administra a sus administradores; el primer dueño lo crea al registrarse.
+        allow create: if isAccountMember(accountId, ['owner'])
+          || (signedIn() && memberUid == uid()
+              && request.resource.data.role == 'owner'
+              && get(/databases/$(database)/documents/accounts/$(accountId)).data.ownerUid == uid());
+        allow update, delete: if isAccountMember(accountId, ['owner']) && memberUid != uid();
       }
     }
 
-    // Código de un solo uso que el dueño dicta en la caja principal. Vence en 30 minutos o menos.
-    match /linkCodes/{code} {
+    // --- Instancias ----------------------------------------------------------
+
+    match /instances/{instanceId} {
+      allow get: if inInstance(instanceId)
+        || isAccountMember(resource.data.accountId, ['owner', 'admin']);
+      // La app busca las instancias donde trabaja el usuario.
+      allow list: if signedIn();
+
+      allow create: if isAccountMember(request.resource.data.accountId, ['owner', 'admin'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.mode in ['colmado', 'restaurant', 'supermarket', 'store']
+        && request.resource.data.active == true;
+
+      allow update: if (hasRole(instanceId, ['owner', 'manager'])
+          || isAccountMember(resource.data.accountId, ['owner', 'admin']))
+        && request.resource.data.accountId == resource.data.accountId
+        && request.resource.data.mode == resource.data.mode;
+      allow delete: if false;
+
+      match /members/{memberUid} {
+        allow read: if inInstance(instanceId);
+        // Se entra con una invitación vigente, o el dueño agrega a mano.
+        allow create: if hasRole(instanceId, ['owner', 'manager'])
+          || isAccountMember(get(instancePath(instanceId)).data.accountId, ['owner', 'admin'])
+          || (signedIn() && memberUid == uid()
+              && validInvite(instanceId, request.resource.data.inviteCode, request.resource.data.role));
+        allow update, delete: if hasRole(instanceId, ['owner', 'manager'])
+          || isAccountMember(get(instancePath(instanceId)).data.accountId, ['owner', 'admin']);
+      }
+
+      // Catálogo, clientes, mesas y ajustes: los administra quien manda en la instancia.
+      match /{collection}/{documentId} {
+        allow read: if inInstance(instanceId)
+          && collection in ['products', 'customers', 'tables', 'settings', 'sales', 'cashSessions', 'orders', 'days'];
+        allow write: if collection in ['products', 'customers', 'tables', 'settings']
+          && hasRole(instanceId, ['owner', 'manager']);
+      }
+
+      // Una venta cobrada no se cambia: solo se anula, y eso lo hace el dueño o un gerente.
+      match /sales/{saleId} {
+        allow create: if hasRole(instanceId, ['owner', 'manager', 'cashier']);
+        allow update: if hasRole(instanceId, ['owner', 'manager'])
+          && resource.data.status == 'completed'
+          && request.resource.data.status == 'voided'
+          && changedKeys().hasOnly(['status', 'voidedAt', 'voidedBy', 'voidReason']);
+        allow delete: if false;
+      }
+
+      // La caja cerrada tampoco cambia.
+      match /cashSessions/{sessionId} {
+        allow create: if hasRole(instanceId, ['owner', 'manager', 'cashier']);
+        allow update: if hasRole(instanceId, ['owner', 'manager', 'cashier'])
+          && resource.data.closedAt == null;
+        allow delete: if false;
+      }
+
+      // Restaurante: el personal de salón toma la orden, cocina solo mueve su estado.
+      match /orders/{orderId} {
+        allow create, update: if hasRole(instanceId, ['owner', 'manager', 'cashier', 'waiter'])
+          || (hasRole(instanceId, ['kitchen'])
+              && changedKeys().hasOnly(['items', 'updatedAt']));
+        allow delete: if false;
+      }
+
+      // Resúmenes del día: los arma el servidor.
+      match /days/{day} {
+        allow write: if false;
+      }
+    }
+
+    // --- Invitaciones --------------------------------------------------------
+
+    match /invites/{code} {
       allow get: if signedIn() && resource.data.expiresAt > request.time;
       allow list: if false;
-      allow create: if code.matches('^[A-HJ-NP-Z2-9]{8}$')
-        && isOwner(request.resource.data.businessId)
-        && request.resource.data.ownerUid == request.auth.uid
+      allow create: if hasRole(request.resource.data.instanceId, ['owner', 'manager'])
+        && request.resource.data.role in ['owner', 'manager', 'cashier', 'waiter', 'kitchen']
         && request.resource.data.expiresAt is timestamp
-        && request.resource.data.expiresAt <= request.time + duration.value(30, 'm');
+        && request.resource.data.expiresAt <= request.time + duration.value(7, 'd');
       allow update: if false;
-      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow delete: if hasRole(resource.data.instanceId, ['owner', 'manager']);
     }
   }
 }

@@ -1,72 +1,60 @@
-# VOXON90 en la nube (opcional)
+# VOXON en Firebase
 
-La caja principal funciona **sin internet**. Esta carpeta solo define el servicio opcional que sube un
-**resumen del negocio** a Firebase para que el dueño lo vea en su celular.
+Aquí viven las **reglas de seguridad** de la plataforma multi-tenant y sus pruebas. El modelo completo
+está en [`docs/arquitectura.md`](../docs/arquitectura.md).
+
+| | |
+| --- | --- |
+| Proyecto | `voxon360-8349a` |
+| Base de datos | `voxon360` (Firestore nativo, edición Enterprise, región `nam5`) |
+| Entrada | Firebase Auth: Google y correo/contraseña |
+
+> La edición Enterprise admite los SDK de cliente, reglas de seguridad, tiempo real y uso sin conexión.
+> La compatibilidad con MongoDB es un modo aparte y está **apagada**: si se enciende, el paquete
+> `cloud_firestore` de Flutter deja de funcionar contra esa base.
+
+## Quién puede qué
 
 ```text
-[Caja principal: motor C++ + servidor Java] ──(cuando hay internet)──► [Firestore] ◄── [App del dueño]
-        cloud.snapshot cada 60 s                 solo lo que cambió           solo lectura
+accounts/{cuenta}                 quien paga: plan, topes, uso y facturación
+accounts/{cuenta}/members/{uid}   dueño o administrador de la cuenta
+instances/{instancia}             un negocio o sucursal, con su modo
+instances/{instancia}/members     empleados: owner, manager, cashier, waiter, kitchen
+instances/{instancia}/…           products, customers, tables, settings, sales, cashSessions, orders, days
+invites/{código}                  invitación para que un empleado entre a una instancia
 ```
 
-Lo que se sube (nada de PIN, costos por proveedor ni datos de empleados más allá del nombre):
+Lo que garantizan las reglas ([`firestore.rules`](firestore.rules)):
 
-| Documento | Contenido |
-| --- | --- |
-| `businesses/{negocio}/snapshots/status` | Nombre del negocio, ventas de hoy, caja abierta, órdenes abiertas, fiao por cobrar |
-| `businesses/{negocio}/days/{AAAA-MM-DD}` | Totales, ITBIS, propina, cobros por método, lo más vendido, ventas por hora, cajeros y últimas 30 ventas |
-| `businesses/{negocio}/snapshots/cash` | Últimas 10 cajas con su cuadre |
-| `businesses/{negocio}/snapshots/inventory` | Productos bajo el mínimo |
-| `businesses/{negocio}/snapshots/receivables` | Clientes que deben |
-| `businesses/{negocio}/devices/{uid}` | Cajas vinculadas (el dueño puede quitar una para revocarla) |
+- **Nadie ve ni escribe fuera de su instancia.** La membresía manda, no la cuenta.
+- **El dinero es del servidor**: `plan`, `limits`, `usage` y `billing` solo los escriben las Cloud
+  Functions. Una cuenta nueva nace en prueba (`v45`, `trial`) y nadie se asciende solo.
+- **Una venta cobrada no cambia**: solo se anula (dueño o gerente) y nunca se borra. La caja cerrada
+  tampoco se toca.
+- **Cocina solo mueve su comanda**; el salón la abre y la cobra.
+- **Las invitaciones caducan** (máximo 7 días) y no sirven para darse un rol mayor al invitado.
+- Los **resúmenes diarios** (`days/`) son de solo lectura para la app: los arma el servidor.
 
-## Cómo se vincula una caja
+Los **topes del plan** (instancias, usuarios, productos, dispositivos) los aplicarán las Cloud Functions,
+porque las reglas no pueden contar documentos. La tabla de planes vive en
+[`shared/plans.json`](../shared/plans.json) y la leen tanto la app como las funciones.
 
-1. El dueño entra a la app del dueño con su cuenta y crea su negocio (`businesses/{id}` con su `uid` en
-   `ownerUids`).
-2. La app genera un **código de 8 caracteres** (`linkCodes/{código}`) que vence en 30 minutos o menos.
-3. En la caja principal: **Ajustes → App del dueño → Vincular**. El servidor entra a Firebase como usuario
-   anónimo, se registra en `devices/{uid}` con ese código y guarda su sesión en `vinculo-nube.json`, junto a
-   la base de datos (solo lo lee el usuario del sistema).
-4. Desde ahí la caja sube el resumen cada vez que cambia algo, y cada 15 minutos avisa que sigue en línea.
+## Probar y publicar
 
-Las reglas ([`firestore.rules`](firestore.rules)) hacen que una caja **solo** pueda escribir `days` y
-`snapshots` del negocio que la vinculó, y que **solo los dueños** lean. No hace falta Cloud Functions ni
-guardar una clave de servicio en el negocio.
-
-## Preparar el proyecto de Firebase
-
-1. Crea un proyecto en [console.firebase.google.com](https://console.firebase.google.com) y una base de
-   **Cloud Firestore**.
-2. Activa **Authentication → Sign-in method**: *Anónimo* (para las cajas) y *Correo/contraseña* (para el dueño).
-3. Publica las reglas: `firebase deploy --only firestore:rules --project <tu-proyecto>`.
-4. Copia el **ID del proyecto** y la **clave web** (Configuración del proyecto → Tus apps → Web).
-5. Arranca el servidor con la nube activada:
-
-```bash
-voxon-server --firebase-project <tu-proyecto> --firebase-api-key <clave-web>
-# o con variables: VOXON_FIREBASE_PROJECT, VOXON_FIREBASE_API_KEY, VOXON_CLOUD_INTERVAL
-```
-
-Sin esas opciones el servidor funciona igual, solo que Ajustes muestra la app del dueño como apagada.
-
-**Costo:** la capa gratuita de Firestore permite 20,000 escrituras por día en todo el proyecto. Cada caja
-escribe solo los documentos que cambiaron (un negocio activo ronda las 600–1,500 escrituras diarias con el
-intervalo por defecto), así que para varios negocios conviene el plan Blaze.
-
-## Pruebas de las reglas
-
-Los emuladores de Firebase necesitan **JDK 21 o superior** (el resto del backend usa JDK 17):
+Los emuladores necesitan **JDK 21 o superior**:
 
 ```bash
 cd firebase
 npm install
-JAVA_HOME=$(brew --prefix openjdk@21) npm test     # macOS con Homebrew
+JAVA_HOME=$(brew --prefix openjdk@21) npm test        # 13 pruebas de reglas
 ```
-
-Y la prueba de punta a punta del sincronizador Java contra los emuladores:
 
 ```bash
-cd firebase
-JAVA_HOME=$(brew --prefix openjdk@21) firebase emulators:exec --only auth,firestore --project demo-voxon90 \
-  "cd ../backend/server && VOXON_FIREBASE_EMULATOR=127.0.0.1 ./gradlew test --tests '*CloudEmulatorTest'"
+firebase deploy --only firestore --project voxon360-8349a   # reglas e índices de la base voxon360
 ```
+
+## Pendiente en la consola de Firebase
+
+1. **Authentication → Sign-in method:** activar *Google* y *Correo/contraseña*.
+2. **Plan Blaze:** necesario para Cloud Functions (Stripe, topes por plan y resúmenes diarios).
+3. Registrar las apps (web y Android) para obtener `apiKey` y `appId` de la app.

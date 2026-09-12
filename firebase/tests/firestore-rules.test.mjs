@@ -1,4 +1,4 @@
-// Reglas de Firestore de la app del dueño, contra el emulador.
+// Reglas multi-tenant de VOXON, contra el emulador.
 //   npm test   (arranca el emulador y corre este archivo)
 import { readFileSync } from 'node:fs';
 import { after, before, beforeEach, describe, it } from 'node:test';
@@ -8,26 +8,22 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, Timestamp } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
 
-const BUSINESS = 'negocio1';
-const DAY = '2026-09-11';
-
-/** Resumen de un día, como el que sube la caja principal. */
-const daySummary = {
-  day: DAY,
-  sales: { count: 2, totalCents: 17700 },
-  syncedAt: Timestamp.now(),
-};
+const ACCOUNT = 'cuenta1';
+const INSTANCE = 'negocio1';
+const OTHER_INSTANCE = 'negocio2';
 
 let env;
 
-/** Minutos a partir de ahora, para el vencimiento de un código. */
-const inMinutes = (minutes) => Timestamp.fromMillis(Date.now() + minutes * 60_000);
+const inDays = (days) => Timestamp.fromMillis(Date.now() + days * 86_400_000);
+
+const db = (uid) =>
+  uid === null ? env.unauthenticatedContext().firestore() : env.authenticatedContext(uid).firestore();
 
 before(async () => {
   env = await initializeTestEnvironment({
-    projectId: 'demo-voxon90',
+    projectId: 'demo-voxon',
     firestore: { rules: readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8') },
   });
 });
@@ -37,152 +33,274 @@ after(() => env.cleanup());
 beforeEach(async () => {
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async (context) => {
-    const db = context.firestore();
-    await setDoc(doc(db, 'businesses', BUSINESS), {
+    const admin = context.firestore();
+    await setDoc(doc(admin, 'accounts', ACCOUNT), {
+      name: 'Grupo Ana',
+      ownerUid: 'ana',
+      plan: { tier: 'v90', status: 'active' },
+      limits: { instances: 2, users: 5, products: 5000, devices: 3 },
+      usage: { instances: 1, users: 3 },
+      billing: { stripeCustomerId: 'cus_123' },
+    });
+    await setDoc(doc(admin, 'accounts', ACCOUNT, 'members', 'ana'), { role: 'owner' });
+    await setDoc(doc(admin, 'instances', INSTANCE), {
+      accountId: ACCOUNT,
       name: 'Colmado La Esquina',
-      ownerUids: ['dueno'],
+      mode: 'colmado',
+      active: true,
     });
-    await setDoc(doc(db, 'businesses', BUSINESS, 'devices', 'caja'), {
-      linkCode: 'ABCD2345',
-      name: 'Caja principal',
+    await setDoc(doc(admin, 'instances', OTHER_INSTANCE), {
+      accountId: 'cuenta2',
+      name: 'Ajeno',
+      mode: 'store',
+      active: true,
     });
-    await setDoc(doc(db, 'linkCodes', 'VIGENTE2'), {
-      businessId: BUSINESS,
-      ownerUid: 'dueno',
-      expiresAt: inMinutes(10),
+    for (const [uid, role] of [
+      ['ana', 'owner'],
+      ['marta', 'manager'],
+      ['luis', 'cashier'],
+      ['pedro', 'waiter'],
+      ['coci', 'kitchen'],
+    ]) {
+      await setDoc(doc(admin, 'instances', INSTANCE, 'members', uid), { role });
+    }
+    await setDoc(doc(admin, 'instances', INSTANCE, 'sales', 'venta1'), {
+      number: 1,
+      status: 'completed',
+      totalCents: 17700,
+      cashierUid: 'luis',
     });
-    await setDoc(doc(db, 'linkCodes', 'VENCIDO2'), {
-      businessId: BUSINESS,
-      ownerUid: 'dueno',
-      expiresAt: inMinutes(-10),
+    await setDoc(doc(admin, 'instances', INSTANCE, 'cashSessions', 'caja1'), {
+      openedBy: 'luis',
+      closedAt: null,
+      openingFloatCents: 100000,
+    });
+    await setDoc(doc(admin, 'instances', INSTANCE, 'orders', 'orden1'), {
+      number: 1,
+      status: 'open',
+      items: [{ productId: 'p1', status: 'sent' }],
+    });
+    await setDoc(doc(admin, 'invites', 'INVITA01'), {
+      instanceId: INSTANCE,
+      role: 'cashier',
+      expiresAt: inDays(7),
+    });
+    await setDoc(doc(admin, 'invites', 'VENCIDA1'), {
+      instanceId: INSTANCE,
+      role: 'cashier',
+      expiresAt: inDays(-1),
     });
   });
 });
 
-const caja = () => env.authenticatedContext('caja').firestore();
-const dueno = () => env.authenticatedContext('dueno').firestore();
-const extrano = () => env.authenticatedContext('extrano').firestore();
-const sinSesion = () => env.unauthenticatedContext().firestore();
+describe('separación entre negocios', () => {
+  it('un empleado solo ve su instancia', async () => {
+    await assertSucceeds(getDoc(doc(db('luis'), 'instances', INSTANCE)));
+    await assertSucceeds(getDocs(collection(db('luis'), 'instances', INSTANCE, 'products')));
 
-describe('la caja vinculada', () => {
-  it('escribe los resúmenes de su negocio', async () => {
-    await assertSucceeds(setDoc(doc(caja(), 'businesses', BUSINESS, 'days', DAY), daySummary));
-    await assertSucceeds(
-      setDoc(doc(caja(), 'businesses', BUSINESS, 'snapshots', 'status'), { openOrders: 0 }),
-    );
-    await assertSucceeds(
-      setDoc(doc(caja(), 'businesses', BUSINESS, 'snapshots', 'receivables'), { totalCents: 5900 }),
-    );
+    await assertFails(getDoc(doc(db('luis'), 'instances', OTHER_INSTANCE)));
+    await assertFails(getDocs(collection(db('luis'), 'instances', OTHER_INSTANCE, 'sales')));
+    await assertFails(getDoc(doc(db(null), 'instances', INSTANCE)));
   });
 
-  it('no escribe nada más del negocio', async () => {
-    await assertFails(setDoc(doc(caja(), 'businesses', BUSINESS), { name: 'Otro nombre', ownerUids: ['caja'] }));
-    await assertFails(setDoc(doc(caja(), 'businesses', BUSINESS, 'snapshots', 'otro'), { x: 1 }));
-    await assertFails(setDoc(doc(caja(), 'businesses', BUSINESS, 'days', 'mañana'), daySummary));
-  });
-
-  it('no lee los datos del dueño', async () => {
-    await assertFails(getDoc(doc(caja(), 'businesses', BUSINESS, 'days', DAY)));
-  });
-});
-
-describe('una caja sin vincular', () => {
-  it('no puede escribir en el negocio', async () => {
-    await assertFails(setDoc(doc(extrano(), 'businesses', BUSINESS, 'days', DAY), daySummary));
-    await assertFails(setDoc(doc(extrano(), 'businesses', BUSINESS, 'snapshots', 'status'), { openOrders: 9 }));
-    await assertFails(setDoc(doc(sinSesion(), 'businesses', BUSINESS, 'days', DAY), daySummary));
-  });
-
-  it('se registra solo con un código vigente', async () => {
-    await assertSucceeds(
-      setDoc(doc(env.authenticatedContext('caja2').firestore(), 'businesses', BUSINESS, 'devices', 'caja2'), {
-        linkCode: 'VIGENTE2',
-        name: 'Caja principal',
-      }),
-    );
+  it('nadie escribe en una instancia ajena', async () => {
     await assertFails(
-      setDoc(doc(env.authenticatedContext('caja3').firestore(), 'businesses', BUSINESS, 'devices', 'caja3'), {
-        linkCode: 'VENCIDO2',
-        name: 'Caja principal',
-      }),
-    );
-    await assertFails(
-      setDoc(doc(env.authenticatedContext('caja4').firestore(), 'businesses', BUSINESS, 'devices', 'caja4'), {
-        linkCode: 'NOEXISTE',
-        name: 'Caja principal',
-      }),
-    );
-    // Tampoco puede registrar a otro equipo con su código.
-    await assertFails(
-      setDoc(doc(env.authenticatedContext('caja5').firestore(), 'businesses', BUSINESS, 'devices', 'caja6'), {
-        linkCode: 'VIGENTE2',
-        name: 'Caja principal',
-      }),
+      setDoc(doc(db('ana'), 'instances', OTHER_INSTANCE, 'products', 'p1'), { name: 'Intruso' }),
     );
   });
 });
 
-describe('el dueño', () => {
-  it('lee su negocio y nadie más', async () => {
-    await assertSucceeds(getDoc(doc(dueno(), 'businesses', BUSINESS)));
-    await assertSucceeds(getDocs(collection(dueno(), 'businesses', BUSINESS, 'days')));
-    await assertSucceeds(getDoc(doc(dueno(), 'businesses', BUSINESS, 'snapshots', 'status')));
-
-    await assertFails(getDoc(doc(extrano(), 'businesses', BUSINESS)));
-    await assertFails(getDocs(collection(extrano(), 'businesses', BUSINESS, 'days')));
-    await assertFails(getDoc(doc(sinSesion(), 'businesses', BUSINESS, 'days', DAY)));
-  });
-
-  it('crea su negocio con él como único dueño', async () => {
-    const db = env.authenticatedContext('nuevo').firestore();
-    await assertSucceeds(setDoc(doc(db, 'businesses', 'negocio2'), { name: 'Bar La Última', ownerUids: ['nuevo'] }));
-    await assertFails(setDoc(doc(db, 'businesses', 'negocio3'), { name: 'Ajeno', ownerUids: ['dueno'] }));
-    await assertFails(setDoc(doc(db, 'businesses', 'negocio4'), { name: '', ownerUids: ['nuevo'] }));
-  });
-
-  it('genera códigos que vencen pronto', async () => {
+describe('roles dentro de la instancia', () => {
+  it('el catálogo lo cambian dueño y gerente', async () => {
     await assertSucceeds(
-      setDoc(doc(dueno(), 'linkCodes', 'NUEVACAJ'), {
-        businessId: BUSINESS,
-        ownerUid: 'dueno',
-        expiresAt: inMinutes(15),
+      setDoc(doc(db('marta'), 'instances', INSTANCE, 'products', 'p1'), { name: 'Refresco', priceCents: 5900 }),
+    );
+    await assertFails(
+      setDoc(doc(db('luis'), 'instances', INSTANCE, 'products', 'p2'), { name: 'Cerveza', priceCents: 9900 }),
+    );
+    await assertSucceeds(getDoc(doc(db('luis'), 'instances', INSTANCE, 'products', 'p1')));
+  });
+
+  it('el cajero vende pero no anula', async () => {
+    await assertSucceeds(
+      setDoc(doc(db('luis'), 'instances', INSTANCE, 'sales', 'venta2'), {
+        number: 2,
+        status: 'completed',
+        totalCents: 5900,
+        cashierUid: 'luis',
       }),
     );
     await assertFails(
-      setDoc(doc(dueno(), 'linkCodes', 'LARGA234'), {
-        businessId: BUSINESS,
-        ownerUid: 'dueno',
-        expiresAt: inMinutes(120),
+      updateDoc(doc(db('luis'), 'instances', INSTANCE, 'sales', 'venta1'), {
+        status: 'voided',
+        voidedAt: Timestamp.now(),
+        voidedBy: 'luis',
+        voidReason: 'Error',
       }),
     );
     await assertFails(
-      setDoc(doc(dueno(), 'linkCodes', 'minuscul'), {
-        businessId: BUSINESS,
-        ownerUid: 'dueno',
-        expiresAt: inMinutes(15),
-      }),
-    );
-    // Nadie genera códigos para un negocio ajeno.
-    await assertFails(
-      setDoc(doc(extrano(), 'linkCodes', 'AJENA234'), {
-        businessId: BUSINESS,
-        ownerUid: 'extrano',
-        expiresAt: inMinutes(15),
-      }),
+      setDoc(doc(db('pedro'), 'instances', INSTANCE, 'sales', 'venta3'), { number: 3, status: 'completed' }),
     );
   });
 
-  it('quita una caja para revocarla', async () => {
-    await assertSucceeds(deleteDoc(doc(dueno(), 'businesses', BUSINESS, 'devices', 'caja')));
-    await assertFails(deleteDoc(doc(extrano(), 'businesses', BUSINESS, 'devices', 'caja')));
+  it('cocina solo mueve el estado de la comanda', async () => {
+    await assertSucceeds(
+      updateDoc(doc(db('coci'), 'instances', INSTANCE, 'orders', 'orden1'), {
+        items: [{ productId: 'p1', status: 'ready' }],
+        updatedAt: Timestamp.now(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db('coci'), 'instances', INSTANCE, 'orders', 'orden1'), { status: 'closed' }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db('pedro'), 'instances', INSTANCE, 'orders', 'orden1'), { status: 'closed' }),
+    );
   });
 });
 
-describe('los códigos de vínculo', () => {
-  it('se leen mientras estén vigentes y nunca se listan', async () => {
-    await assertSucceeds(getDoc(doc(caja(), 'linkCodes', 'VIGENTE2')));
-    await assertFails(getDoc(doc(caja(), 'linkCodes', 'VENCIDO2')));
-    await assertFails(getDoc(doc(sinSesion(), 'linkCodes', 'VIGENTE2')));
-    await assertFails(getDocs(collection(caja(), 'linkCodes')));
+describe('una venta cobrada no se toca', () => {
+  it('solo se anula, y nunca se borra', async () => {
+    await assertSucceeds(
+      updateDoc(doc(db('ana'), 'instances', INSTANCE, 'sales', 'venta1'), {
+        status: 'voided',
+        voidedAt: Timestamp.now(),
+        voidedBy: 'ana',
+        voidReason: 'Cobro duplicado',
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db('ana'), 'instances', INSTANCE, 'sales', 'venta1'), { totalCents: 1 }),
+    );
+    await assertFails(deleteDoc(doc(db('ana'), 'instances', INSTANCE, 'sales', 'venta1')));
+  });
+
+  it('la caja cerrada queda como está', async () => {
+    await assertSucceeds(
+      updateDoc(doc(db('luis'), 'instances', INSTANCE, 'cashSessions', 'caja1'), {
+        countedCashCents: 111800,
+        closedAt: Timestamp.now(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db('luis'), 'instances', INSTANCE, 'cashSessions', 'caja1'), { countedCashCents: 0 }),
+    );
+  });
+});
+
+describe('el dinero lo maneja el servidor', () => {
+  it('nadie cambia su plan, sus topes ni su facturación', async () => {
+    await assertFails(
+      updateDoc(doc(db('ana'), 'accounts', ACCOUNT), { plan: { tier: 'v360', status: 'active' } }),
+    );
+    await assertFails(updateDoc(doc(db('ana'), 'accounts', ACCOUNT), { limits: { instances: 99 } }));
+    await assertFails(updateDoc(doc(db('ana'), 'accounts', ACCOUNT), { usage: { instances: 0 } }));
+    await assertSucceeds(updateDoc(doc(db('ana'), 'accounts', ACCOUNT), { name: 'Grupo Ana SRL' }));
+  });
+
+  it('la cuenta nueva nace en prueba y sin facturación', async () => {
+    await assertSucceeds(
+      setDoc(doc(db('nueva'), 'accounts', 'cuenta3'), {
+        name: 'Bar La Última',
+        ownerUid: 'nueva',
+        plan: { tier: 'v45', status: 'trial' },
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db('nueva'), 'accounts', 'cuenta4'), {
+        name: 'Trampa',
+        ownerUid: 'nueva',
+        plan: { tier: 'v360', status: 'active' },
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db('nueva'), 'accounts', 'cuenta5'), {
+        name: 'Trampa',
+        ownerUid: 'ana',
+        plan: { tier: 'v45', status: 'trial' },
+      }),
+    );
+  });
+
+  it('el resumen del día lo escribe el servidor', async () => {
+    await assertFails(
+      setDoc(doc(db('ana'), 'instances', INSTANCE, 'days', '2026-09-11'), { totalCents: 999 }),
+    );
+    await assertSucceeds(getDoc(doc(db('ana'), 'instances', INSTANCE, 'days', '2026-09-11')));
+  });
+});
+
+describe('instancias e invitaciones', () => {
+  it('solo la cuenta crea instancias, con un modo válido', async () => {
+    await assertSucceeds(
+      setDoc(doc(db('ana'), 'instances', 'negocio3'), {
+        accountId: ACCOUNT,
+        name: 'Sucursal 2',
+        mode: 'restaurant',
+        active: true,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db('ana'), 'instances', 'negocio4'), {
+        accountId: ACCOUNT,
+        name: 'Rara',
+        mode: 'casino',
+        active: true,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db('luis'), 'instances', 'negocio5'), {
+        accountId: ACCOUNT,
+        name: 'Del cajero',
+        mode: 'store',
+        active: true,
+      }),
+    );
+  });
+
+  it('un empleado entra con una invitación vigente', async () => {
+    await assertSucceeds(
+      setDoc(doc(db('nuevo'), 'instances', INSTANCE, 'members', 'nuevo'), {
+        role: 'cashier',
+        inviteCode: 'INVITA01',
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db('otro'), 'instances', INSTANCE, 'members', 'otro'), {
+        role: 'cashier',
+        inviteCode: 'VENCIDA1',
+      }),
+    );
+    // La invitación no sirve para darse un rol mayor.
+    await assertFails(
+      setDoc(doc(db('vivo'), 'instances', INSTANCE, 'members', 'vivo'), {
+        role: 'owner',
+        inviteCode: 'INVITA01',
+      }),
+    );
+  });
+
+  it('las invitaciones las crea quien manda y duran poco', async () => {
+    await assertSucceeds(
+      setDoc(doc(db('marta'), 'invites', 'NUEVA001'), {
+        instanceId: INSTANCE,
+        role: 'waiter',
+        expiresAt: inDays(3),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db('marta'), 'invites', 'LARGA001'), {
+        instanceId: INSTANCE,
+        role: 'waiter',
+        expiresAt: inDays(30),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db('luis'), 'invites', 'DELCAJERO'), {
+        instanceId: INSTANCE,
+        role: 'owner',
+        expiresAt: inDays(1),
+      }),
+    );
   });
 });
