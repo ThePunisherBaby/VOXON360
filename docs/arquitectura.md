@@ -8,7 +8,7 @@ qué pantallas y reglas aplican. El **plan** de la suscripción abre funciones y
 [App VOXON (Flutter: Android, iOS, web, escritorio)]
         │  Google o correo (Firebase Auth)
         ▼
-[Firestore  proyecto voxon360-8349a · base "voxon360"]
+[Firestore  proyecto voxon360-8349a · base principal (default), Standard]
   cuentas · instancias · empleados · catálogo · ventas · caja · resúmenes
         ▲                         ▲
         │ reglas de seguridad     │ Cloud Functions

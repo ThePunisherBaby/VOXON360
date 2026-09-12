@@ -5,13 +5,13 @@ está en [`docs/arquitectura.md`](../docs/arquitectura.md).
 
 | | |
 | --- | --- |
-| Proyecto | `voxon360-8349a` |
-| Base de datos | `voxon360` (Firestore nativo, edición Enterprise, región `nam5`) |
+| Proyecto | `voxon360-8349a` (nombre visible: voxon360) |
+| Base de datos | `(default)`, Firestore edición Standard, región `nam5`, con protección contra borrado |
 | Entrada | Firebase Auth: Google y correo/contraseña |
 
-> La edición Enterprise admite los SDK de cliente, reglas de seguridad, tiempo real y uso sin conexión.
-> La compatibilidad con MongoDB es un modo aparte y está **apagada**: si se enciende, el paquete
-> `cloud_firestore` de Flutter deja de funcionar contra esa base.
+> El proyecto también tiene una base llamada `voxon360`, pero se creó en modo compatible con MongoDB:
+> tiene apagados el acceso de Firestore y el tiempo real, así que ni la app ni las funciones pueden
+> usarla, y Google no deja cambiar ese modo. Por eso VOXON usa la base principal `(default)`.
 
 ## Quién puede qué
 
@@ -50,11 +50,15 @@ JAVA_HOME=$(brew --prefix openjdk@21) npm test        # 13 pruebas de reglas
 ```
 
 ```bash
-firebase deploy --only firestore --project voxon360-8349a   # reglas e índices de la base voxon360
+firebase deploy --only firestore --project voxon360-8349a   # reglas e índices de la base (default)
+firebase deploy --only functions --project voxon360-8349a
 ```
 
-## Pendiente en la consola de Firebase
+## Estado del proyecto
 
-1. **Authentication → Sign-in method:** activar *Google* y *Correo/contraseña*.
-2. **Plan Blaze:** necesario para Cloud Functions (Stripe, topes por plan y resúmenes diarios).
-3. Registrar las apps (web y Android) para obtener `apiKey` y `appId` de la app.
+- **Authentication:** Google y correo/contraseña activos (el correo se comprobó con un usuario de prueba).
+- **Plan Blaze:** activo; las Cloud Functions están instaladas en `us-central1`.
+- **Apps:** la web está registrada. Android e iOS se registran cuando se defina el identificador de la app.
+- **Stripe:** las funciones de cobro están instaladas con claves provisionales y responden «no configurado»
+  hasta cargar las reales con `firebase functions:secrets:set STRIPE_SECRET_KEY` y `STRIPE_WEBHOOK_SECRET`.
+  El webhook es `https://us-central1-voxon360-8349a.cloudfunctions.net/stripeWebhook`.
